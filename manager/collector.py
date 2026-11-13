@@ -51,6 +51,7 @@ class Message:
     time: int                    # create_time
     local_id: int
     table: str
+    is_self: bool = False        # 是否自己发出（用于避免 TG↔微信 回声）
     raw: str = field(default="", repr=False)   # 原始 message_content（xml 等）
 
 
@@ -83,6 +84,13 @@ class Collector:
         self._chat_map: dict[str, str] = {}   # 表名 → 会话 username
         self._chat_ts = 0.0
         os.makedirs(PLAIN_DIR, exist_ok=True)
+
+    def self_id(self) -> str:
+        """当前登录账号标识（= db_storage 上级目录名去掉末尾 _xxxx），用于识别自己发的消息。"""
+        if not self.db_dir:
+            return ""
+        acct = os.path.basename(os.path.dirname(self.db_dir))   # 如 bidabrain_b740
+        return acct.rsplit("_", 1)[0] if "_" in acct else acct
 
     # -------------------------------------------------------------- 密钥/解密
     def ready(self) -> bool:
@@ -189,6 +197,7 @@ class Collector:
         typ = lt & 0xFFFFFFFF
         sub = lt >> 32
         sender_wxid = id2name.get(r["real_sender_id"], "") if r["real_sender_id"] else ""
+        is_self = bool(sender_wxid) and sender_wxid == self.self_id()
         if not sender_wxid and not is_group:
             sender_wxid = chat_id
         raw = _decompress(r["message_content"]) or _decompress(r["compress_content"]) or ""
@@ -197,7 +206,8 @@ class Collector:
             chat_id=chat_id, chat_name=chat_name, is_group=is_group,
             sender_id=sender_wxid, sender_name=self._display(sender_wxid) if sender_wxid else "",
             type=typ, sub_type=sub, text=text, time=r["create_time"] or 0,
-            local_id=r["local_id"], table=table, raw=raw if isinstance(raw, str) else "",
+            local_id=r["local_id"], table=table, is_self=is_self,
+            raw=raw if isinstance(raw, str) else "",
         )
 
     def _render(self, typ: int, sub: int, raw) -> str:

@@ -93,6 +93,8 @@ class Bridge:
     def _on_wx(self, m: Message):
         if not self.cfg.get("forward_enabled", True) or not self.loop or not self.app:
             return
+        if m.is_self:
+            return                         # 自己发出的消息不回转，避免 TG↔微信 回声
         asyncio.run_coroutine_threadsafe(self._send_tg(m), self.loop)
 
     async def _send_tg(self, m: Message):
