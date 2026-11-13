@@ -27,7 +27,7 @@ except ImportError:  # 独立运行
     from collector import Collector, Message
     from common import DATA
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 POLL_CONFIG_SEC = 5
@@ -191,6 +191,14 @@ class Bridge:
         await self.app.initialize()
         await self.app.start()
         await self.app.updater.start_polling(drop_pending_updates=True)
+        try:
+            # 用当前命令覆盖掉旧 bot 程序残留的命令菜单
+            await self.app.bot.set_my_commands([
+                BotCommand("contacts", "查最近会话（可带关键词）"),
+                BotCommand("to", "发起对话：/to 名字 消息"),
+            ])
+        except Exception as e:  # noqa: BLE001
+            print("设置命令菜单失败:", e, flush=True)
         try:
             await self.app.bot.send_message(self.chat_id, "✅ wechat2tg 桥接已连接（Topic 模式）。")
         except Exception as e:  # noqa: BLE001
