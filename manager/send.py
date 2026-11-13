@@ -109,8 +109,69 @@ def send_to_open(text: str) -> dict:
     return {"ok": True, "step": "sent", "msg": "已发送到当前会话"}
 
 
+DROPDOWN_REGION = (56, 85, 262, 560)   # 搜索下拉区域
+_SKIP_ROWS = ("搜索网络结果", "群聊", "联系人", "聊天记录", "收藏", "查看全部", "更多", "网络查找")
+
+
+def _ocr_lines(region) -> list[tuple[str, int, int]]:
+    """OCR 区域，返回 [(行文本, 行中心x绝对, 行中心y绝对)]。"""
+    fd, png = tempfile.mkstemp(suffix=".png"); os.close(fd)
+    out = []
+    try:
+        if subprocess.run(["scrot", "-a", ",".join(map(str, region)), "-o", png],
+                          capture_output=True, env=_env()).returncode != 0:
+            return out
+        base = png[:-4]
+        subprocess.run(["tesseract", png, base, "-l", "chi_sim+eng", "tsv"], capture_output=True, env=_env())
+        tsv = base + ".tsv"
+        if not os.path.exists(tsv):
+            return out
+        lines = {}
+        with open(tsv, encoding="utf-8") as f:
+            next(f, None)
+            for row in f:
+                c = row.rstrip("\n").split("\t")
+                if len(c) < 12 or not c[11].strip():
+                    continue
+                lines.setdefault(tuple(c[1:5]), []).append((int(c[6]), int(c[7]), int(c[8]), int(c[9]), c[11]))
+        os.remove(tsv)
+        for parts in lines.values():
+            text = "".join(p[4] for p in parts)
+            x0 = min(p[0] for p in parts); x1 = max(p[0] + p[2] for p in parts)
+            y0 = min(p[1] for p in parts); y1 = max(p[1] + p[3] for p in parts)
+            out.append((text, region[0] + (x0 + x1) // 2, region[1] + (y0 + y1) // 2))
+    finally:
+        try:
+            os.remove(png)
+        except OSError:
+            pass
+    return out
+
+
+def _find_result_row(chat_name: str) -> tuple[int, int] | None:
+    """OCR 搜索下拉，找与 chat_name 匹配的结果行坐标（兼容联系人/群，联系人常在固定位，群靠 OCR）。"""
+    g = _norm(chat_name)
+    best = None
+    skip_from = -1          # 收藏/聊天记录 区起始 y，之后的行一律跳过（不是会话本身）
+    for text, cx, cy in sorted(_ocr_lines(DROPDOWN_REGION), key=lambda r: r[2]):
+        if ("收藏" in text or "聊天记录" in text) and skip_from < 0:
+            skip_from = cy
+        t = _norm(text)
+        if not t or any(s in text for s in _SKIP_ROWS) or "包含" in text or "来自" in text:
+            continue        # 跳过分区标题、"包含:xxx"/"来自:xxx" 预览
+        if skip_from >= 0 and cy > skip_from:
+            continue        # 收藏/聊天记录区的项目不是会话，跳过
+        if cy < 110:
+            continue        # 顶部查询回显
+        if t == g:
+            return (cx, cy)                      # 完全匹配优先
+        if best is None and len(g) >= 2 and (g in t or t in g):
+            best = (cx, cy)
+    return best
+
+
 def _open_chat(win: str, chat_name: str) -> bool:
-    """搜索并单击匹配项打开会话，OCR 标题核对是否为目标。"""
+    """搜索并打开会话：OCR 下拉找匹配行点击（兼容群），联系人用固定位兜底，OCR 标题核对。"""
     _click(*SEARCH_XY)
     _x("key", "ctrl+a")
     _x("key", "Delete")
@@ -118,11 +179,21 @@ def _open_chat(win: str, chat_name: str) -> bool:
     time.sleep(0.1)
     _x("key", "ctrl+v")
     time.sleep(1.6)                 # 等下拉结果稳定
-    _click(*RESULT_XY)             # 单击第一个匹配项 → 右侧打开该会话
+    pos = _find_result_row(chat_name)
+    _click(*(pos or RESULT_XY))    # OCR 找到就点它，否则点固定首位（联系人）
     time.sleep(0.8)
     title = _ocr_title()
     g = _norm(chat_name)
-    return bool(title) and (title == g or (len(g) >= 2 and (g in title or title in g)))
+    if bool(title) and (title == g or (len(g) >= 2 and (g in title or title in g))):
+        return True
+    # 兜底失败时再试另一种：之前点了 OCR 位就补点固定位，反之亦然
+    if pos:
+        _click(*SEARCH_XY); _x("key", "ctrl+a"); _x("key", "Delete")
+        _clip(chat_name); time.sleep(0.1); _x("key", "ctrl+v"); time.sleep(1.6)
+        _click(*RESULT_XY); time.sleep(0.8)
+        title = _ocr_title()
+        return bool(title) and (title == g or (len(g) >= 2 and (g in title or title in g)))
+    return False
 
 
 def send_to_chat(chat_name: str, chat_id: str, text: str) -> dict:
