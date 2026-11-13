@@ -138,6 +138,33 @@ def send_to_chat(chat_name: str, chat_id: str, text: str) -> dict:
         return send_to_open(text)
 
 
+def _clip_image(path: str):
+    subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", "-i", path], env=_env())
+
+
+def _paste_send():
+    _click(*INPUT_XY)
+    time.sleep(0.2)
+    _x("key", "ctrl+v")
+    time.sleep(0.8)
+    _x("key", "Return")
+
+
+def send_image_to_chat(chat_name: str, chat_id: str, image_path: str) -> dict:
+    """打开会话（OCR 标题核对）并把图片经剪贴板粘贴发送；核对不通过不发送。"""
+    with _LOCK:
+        win = _wechat_win()
+        if not win:
+            return {"ok": False, "step": "find_window", "msg": "找不到微信窗口"}
+        _normalize(win)
+        if not _open_chat(win, chat_name):
+            return {"ok": False, "step": "verify", "msg": f"未能定位会话「{chat_name}」（已避免误发）"}
+        _clip_image(image_path)
+        time.sleep(0.3)
+        _paste_send()
+        return {"ok": True, "step": "sent", "msg": "已发送图片"}
+
+
 def send_text(target: str, text: str) -> dict:
     return send_to_chat(target, target, text)
 

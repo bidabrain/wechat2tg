@@ -60,10 +60,10 @@ class Bridge:
         return "".join((s or "").split())
 
     def _is_bridge_echo(self, m: "Message") -> bool:
-        """自己发出的消息里，只有与桥接刚发出的 (会话, 文本) 匹配的才算回声。"""
+        """自己发出的消息里，只有与桥接刚发出的（会话, 文本/媒体）匹配的才算回声。"""
         now = time.time()
         self._recent_sent = [e for e in self._recent_sent if now - e[2] < 120]
-        key = self._norm(m.text)
+        key = "\x00MEDIA" if m.type in (3, 34, 43, 47) else self._norm(m.text)
         for i, (cid, txt, _) in enumerate(self._recent_sent):
             if cid == m.chat_id and txt == key:
                 self._recent_sent.pop(i)
@@ -188,6 +188,34 @@ class Bridge:
         else:
             await msg.reply_text(f"❌ 发送失败：{r.get('msg')}")
 
+    async def on_tg_photo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """TG 某 topic 里发来的图片 → 下载 → 粘贴发回对应微信会话。"""
+        if not self.cfg.get("reply_enabled", True):
+            return
+        msg = update.effective_message
+        tid = msg.message_thread_id if msg else None
+        chat_id = self.rev.get(tid) if tid else None
+        if not chat_id or not msg.photo:
+            return
+        name = self.map[chat_id]["name"]
+        tmp = DATA / "media" / f"tg_{msg.message_id}.jpg"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            tgf = await msg.photo[-1].get_file()           # 最大尺寸
+            await tgf.download_to_drive(str(tmp))
+            r = await asyncio.to_thread(send.send_image_to_chat, name, chat_id, str(tmp))
+            if r.get("ok"):
+                self._recent_sent.append((chat_id, "\x00MEDIA", time.time()))
+            else:
+                await msg.reply_text(f"❌ 图片发送失败：{r.get('msg')}")
+        except Exception as e:  # noqa: BLE001
+            await msg.reply_text(f"❌ 图片发送异常：{e}")
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
     # -------------------------------------------------- 命令：发起新对话 / 查联系人
     async def cmd_contacts(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kw = " ".join(ctx.args) if ctx.args else ""
@@ -241,6 +269,8 @@ class Bridge:
         self.app.add_handler(CommandHandler("to", self.cmd_to, filters.Chat(self.chat_id)))
         self.app.add_handler(MessageHandler(
             filters.Chat(self.chat_id) & filters.TEXT & ~filters.COMMAND, self.on_tg_message))
+        self.app.add_handler(MessageHandler(
+            filters.Chat(self.chat_id) & filters.PHOTO, self.on_tg_photo))
         self.loop = asyncio.get_running_loop()
         threading.Thread(target=self._collector_loop, daemon=True).start()
         print(f"[bridge] 已启动，目标群 chat_id={self.chat_id}，已载入 {len(self.map)} 个 topic 映射", flush=True)
