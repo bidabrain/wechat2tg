@@ -75,25 +75,40 @@ docker compose up -d
 
 > 注意：bot 不能主动给陌生人发消息。请先在 Telegram 里找到你的 bot，点 **Start**（发一条 `/start`），bot 才能给你发消息。
 
-### 第三步（可选）：转发到群 / 频道的 Chat ID
+### 第三步（推荐）：建一个群并拿到群 Chat ID
 
-如果想把微信消息转发到一个 Telegram 群：
+推荐把消息转发到一个 **Telegram 群**，配合下面的 **Topic 模式**按会话分栏管理。
 
-1. 把你的 bot 拉进群，并设为管理员（便于用话题/Topic 分流）。
-2. 获取群的 `chat id`：
-   - 简单办法：在群里发一条消息，然后浏览器访问
-     `https://api.telegram.org/bot<你的TOKEN>/getUpdates`
-     在返回的 JSON 里找 `"chat":{"id":-100xxxxxxxxxx,...}`，这个负数就是群 `chat id`。
-   - 或把 **@userinfobot** / **@getidsbot** 拉进群查看。
-3. 群 `chat id` 通常是以 `-100` 开头的负数，填到 `TG_CHAT_ID`。
+1. 新建一个 Telegram 群，把你的 bot 拉进去。
+2. 获取群的 `chat id`：在群里发一条消息，浏览器访问
+   `https://api.telegram.org/bot<你的TOKEN>/getUpdates`
+   （把 `<你的TOKEN>` 换成整串 token，不要带尖括号），在返回 JSON 里找
+   `"chat":{"id":-100xxxxxxxxxx,...}`。
+3. 群 `chat id` 是以 **`-100` 开头的负数**（例如 `-1004457133614`），填到 `TG_CHAT_ID`。
+   **注意别漏掉负号**，否则会报 `Chat not found`。
 
-### 第四步：填入配置
+> 也可以转发给你自己：`TG_CHAT_ID` 填你的 user id（@userinfobot 查），并先对 bot 发 `/start`。
+> 但这样所有会话混在一个对话里，不如用群 + Topic 模式清晰。
+
+### 第四步：开启 Topic 模式（强烈推荐）
+
+开启后，**每个微信会话（联系人/群）会自动对应群里的一个 Topic（话题）**：消息按会话分栏，
+你**直接在对应 topic 里打字就发回该微信会话**，不用「回复某条消息」。需要两个设置：
+
+1. **开启群的 Topics**：进群资料 → 编辑 → 打开「**Topics / 话题**」开关（群会变成论坛模式）。
+2. **给 bot 加「管理话题」权限**：群资料 → **Administrators / 管理员** → 选中你的 bot →
+   打开「**Manage Topics / 管理话题**」→ 保存。
+
+没开 Topics 也能用（所有消息发到群主对话、带上会话名前缀），只是不能按会话分栏和直接回复。
+
+### 第五步：填入配置
 
 两种方式任选：
-- **面板配置**（推荐）：在 Web 面板的转发设置里填 `TG_BOT_TOKEN` 和 `TG_CHAT_ID`，即时生效。
-- **环境变量**：在 `docker-compose.yml` 的 `environment` 里取消注释并填入 `TG_BOT_TOKEN` / `TG_CHAT_ID`，然后 `docker compose up -d` 重启。
+- **面板配置**（推荐）：在 Web 面板的「Telegram」标签填 `Bot Token` 和 `Chat ID`，保存即生效。
+- **环境变量**：在 `docker-compose.yml` 的 `environment` 里填 `TG_BOT_TOKEN` / `TG_CHAT_ID`，`docker compose up -d` 重启。
 
-填好后，给这个微信号发条消息，应该很快会出现在你的 Telegram 里。
+填好后给这个微信号发条消息：bridge 会为该会话自动建一个 topic，消息进到那个 topic 里。
+在 topic 里直接打字即可回发到微信。topic 映射保存在 `/data/topics.json`，重启不丢。
 
 ## 开发 / 本地构建
 
