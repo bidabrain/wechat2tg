@@ -128,9 +128,12 @@ class Collector:
             return self._contacts
         m: dict[str, dict] = {}
         c = sqlite3.connect(out)
-        for uname, remark, nick, ctype in c.execute(
-            "SELECT username, remark, nick_name, chat_room_type FROM contact"
-        ):
+        try:
+            cur = c.execute("SELECT username, remark, nick_name, chat_room_type FROM contact")
+        except sqlite3.OperationalError:
+            c.close()
+            return self._contacts
+        for uname, remark, nick, ctype in cur:
             if not uname:
                 continue
             name = (remark or "").strip() or (nick or "").strip() or uname
@@ -231,7 +234,10 @@ class Collector:
                 continue
             c = sqlite3.connect(out)
             c.row_factory = sqlite3.Row
-            id2name = {r[0]: r[1] for r in c.execute("SELECT rowid, user_name FROM Name2Id")}
+            try:
+                id2name = {r[0]: r[1] for r in c.execute("SELECT rowid, user_name FROM Name2Id")}
+            except sqlite3.OperationalError:
+                id2name = {}          # 新账号/无消息时 Name2Id 表尚不存在
             tabs = [r[0] for r in c.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'")]
             for t in tabs:
