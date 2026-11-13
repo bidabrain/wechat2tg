@@ -47,7 +47,24 @@ class Bridge:
         self.map: dict[str, dict] = {}
         self.rev: dict[int, str] = {}
         self._load_topics()
+        # 桥接刚发到微信的消息 [(chat_id, 规范化文本, 时间)]，用于只过滤桥接自身的回声
+        self._recent_sent: list[tuple[str, str, float]] = []
         self.col = Collector(self.home, on_message=self._on_wx)
+
+    @staticmethod
+    def _norm(s: str) -> str:
+        return "".join((s or "").split())
+
+    def _is_bridge_echo(self, m: "Message") -> bool:
+        """自己发出的消息里，只有与桥接刚发出的 (会话, 文本) 匹配的才算回声。"""
+        now = time.time()
+        self._recent_sent = [e for e in self._recent_sent if now - e[2] < 120]
+        key = self._norm(m.text)
+        for i, (cid, txt, _) in enumerate(self._recent_sent):
+            if cid == m.chat_id and txt == key:
+                self._recent_sent.pop(i)
+                return True
+        return False
 
     # -------------------------------------------------- 映射持久化
     def _load_topics(self):
@@ -93,8 +110,9 @@ class Bridge:
     def _on_wx(self, m: Message):
         if not self.cfg.get("forward_enabled", True) or not self.loop or not self.app:
             return
-        if m.is_self:
-            return                         # 自己发出的消息不回转，避免 TG↔微信 回声
+        if m.is_self and self._is_bridge_echo(m):
+            return                         # 只跳过桥接自己发的那条（避免回声）；
+                                           # 从微信客户端/手机发的自己消息照常转发
         asyncio.run_coroutine_threadsafe(self._send_tg(m), self.loop)
 
     async def _send_tg(self, m: Message):
@@ -103,6 +121,8 @@ class Bridge:
             text = m.text or ""
             if m.is_group and m.sender_name:
                 text = f"{m.sender_name}:\n{text}"
+            elif m.is_self:
+                text = f"🟢 我：{text}"           # 自己从微信客户端/手机发的
             elif tid is None:
                 text = f"【{m.chat_name}】{text}"   # 没有 topic 时带上会话名
             await self.app.bot.send_message(self.chat_id, text, message_thread_id=tid)
@@ -122,7 +142,10 @@ class Bridge:
             return                         # General 或未映射的 topic，忽略
         name = self.map[chat_id]["name"]
         r = await asyncio.to_thread(send.send_to_chat, name, chat_id, msg.text)
-        if not r.get("ok"):
+        if r.get("ok"):
+            # 记下这条，稍后采集到同样的「自己发出」消息时识别为回声并跳过
+            self._recent_sent.append((chat_id, self._norm(msg.text), time.time()))
+        else:
             await msg.reply_text(f"❌ 发送失败：{r.get('msg')}")
 
     # -------------------------------------------------- 运行
