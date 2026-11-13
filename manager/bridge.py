@@ -17,12 +17,15 @@ import threading
 import time
 from pathlib import Path
 
+import os
+
 try:
-    from . import config, send
+    from . import config, media, send
     from .collector import Collector, Message
     from .common import DATA
 except ImportError:  # 独立运行
     import config
+    import media
     import send
     from collector import Collector, Message
     from common import DATA
@@ -122,9 +125,32 @@ class Bridge:
                                            # 从微信客户端/手机发的自己消息照常转发
         asyncio.run_coroutine_threadsafe(self._send_tg(m), self.loop)
 
+    def _grab_image(self, m: Message) -> str | None:
+        """打开会话并把最新图片另存到临时目录（UI 自动化，阻塞，串行化）。"""
+        with send._LOCK:
+            win = send._wechat_win()
+            if not win or not send._open_chat(win, m.chat_name):
+                return None
+            return media.save_latest_image(f"wx_{m.table[:8]}_{m.local_id}.jpg")
+
     async def _send_tg(self, m: Message):
         try:
             tid = await self._topic_for(m.chat_id, m.chat_name)
+            prefix = f"{m.sender_name}:\n" if (m.is_group and m.sender_name) else ("🟢 我：" if m.is_self else "")
+            # 图片：抓取解密文件发为 photo；失败回退占位文本
+            if m.type == 3 and self.cfg.get("media_enabled", True):
+                path = await asyncio.to_thread(self._grab_image, m)
+                if path:
+                    try:
+                        with open(path, "rb") as f:
+                            await self.app.bot.send_photo(self.chat_id, f, message_thread_id=tid,
+                                                          caption=(prefix.strip(" :\n") or None))
+                        return
+                    finally:
+                        try:
+                            os.remove(path)
+                        except OSError:
+                            pass
             text = m.text or ""
             if m.is_group and m.sender_name:
                 text = f"{m.sender_name}:\n{text}"
