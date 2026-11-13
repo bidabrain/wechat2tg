@@ -308,6 +308,8 @@ class Bridge:
         self.app.add_handler(MessageHandler(
             filters.Chat(self.chat_id) & (filters.VIDEO | filters.ANIMATION), self.on_tg_video))
         self.loop = asyncio.get_running_loop()
+        self._clean_media(0)                 # 启动清空残留临时媒体
+        asyncio.create_task(self._media_cleaner())
         threading.Thread(target=self._collector_loop, daemon=True).start()
         print(f"[bridge] 已启动，目标群 chat_id={self.chat_id}，已载入 {len(self.map)} 个 topic 映射", flush=True)
         await self.app.initialize()
@@ -334,6 +336,25 @@ class Bridge:
             print("连接测试消息发送失败（检查 chat_id / bot 是否在群里）:", e, flush=True)
         while True:
             await asyncio.sleep(3600)
+
+    def _clean_media(self, max_age: float):
+        """清理 /data/media 下的临时文件（max_age=0 清全部；否则清超过该秒数的）。"""
+        d = DATA / "media"
+        if not d.exists():
+            return
+        now = time.time()
+        for f in d.iterdir():
+            try:
+                if f.is_file() and now - f.stat().st_mtime >= max_age:
+                    f.unlink()
+            except OSError:
+                pass
+
+    async def _media_cleaner(self):
+        """定期清理残留的临时媒体文件（超过 5 分钟的），避免目录膨胀。"""
+        while True:
+            await asyncio.sleep(300)
+            self._clean_media(300)
 
     def _collector_loop(self):
         while True:
