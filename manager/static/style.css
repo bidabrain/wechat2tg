@@ -110,3 +110,18 @@ table.tbl th, table.tbl td { text-align: left; padding: 6px 8px; border-top: 1px
 table.tbl th { color: var(--muted); font-weight: 500; border-top: 0; white-space: nowrap; }
 img.shot { display: block; max-width: 100%; max-height: 520px; margin-top: 10px; border-radius: 8px; border: 1px solid var(--border); }
 code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+
+/* ---- Linux 面板补充 ---- */
+.topbar b { font-size: 16px; white-space: nowrap; }
+.tabs { display: flex; gap: 4px; overflow-x: auto; }
+.pane { animation: none; }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-top: 1px solid var(--border); }
+.kv:first-of-type { border-top: 0; }
+.kv span { color: var(--muted); }
+.badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.badge.good { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.badge.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+iframe.vnc { width: 100%; height: min(78vh, 900px); min-height: 420px; border: 0; border-radius: 10px; background: #000; display: block; }
+.pane label { display: block; margin: 12px 0 4px; font-weight: 500; }
+.pane label.ck { display: flex; gap: 8px; align-items: center; font-weight: 400; cursor: pointer; }
+.pane label .muted { font-weight: 400; }

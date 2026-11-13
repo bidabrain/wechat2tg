@@ -7,234 +7,101 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-  <div class="logo">微</div>
-  <h1>wechat2tg <span class="muted" style="font-weight:400">P0 验证</span></h1>
-  <nav id="nav">
-    <button data-tab="overview" class="active">概览</button>
-    <button data-tab="android">安卓画面</button>
-    <button data-tab="device">设备与微信</button>
-    <button data-tab="db">数据库验证</button>
-    <button data-tab="send">发送验证</button>
-    <button data-tab="scan">扫码</button>
-    <button data-tab="logs">日志</button>
-  </nav>
-  <button class="btn" id="logoutBtn">退出</button>
-</header>
+  <header class="topbar">
+    <b>wechat2tg</b>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="active">概览</button>
+      <button data-tab="screen">微信画面</button>
+      <button data-tab="telegram">Telegram</button>
+      <button data-tab="messages">最近消息</button>
+      <button data-tab="logs">日志</button>
+    </nav>
+    <span style="flex:1"></span>
+    <button class="btn" id="logout">退出</button>
+  </header>
 
-<main>
-  <!-- 概览 -->
-  <section class="tab active" id="tab-overview">
-    <div class="grid" id="stats"></div>
-    <div class="card">
-      <h2>P0 验证清单</h2>
-      <p class="muted" style="margin-top:0">能自动判断的项会自动打勾，其余需要你在对应页面操作后确认。清单结果保存在本浏览器里。</p>
-      <ul class="steps" id="checklist"></ul>
-    </div>
-  </section>
+  <main>
+    <!-- 概览 -->
+    <section data-pane="overview" class="pane">
+      <div class="grid">
+        <div class="card">
+          <h3>微信</h3>
+          <div class="kv"><span>进程</span><b id="wx-running">—</b></div>
+          <div class="kv"><span>登录</span><b id="wx-login">—</b></div>
+          <p class="muted" id="wx-hint"></p>
+          <button class="btn" id="btn-restart-wechat">重启微信</button>
+        </div>
+        <div class="card">
+          <h3>转发服务</h3>
+          <div class="kv"><span>桥接(bridge)</span><b id="svc-bridge">—</b></div>
+          <div class="kv"><span>Telegram</span><b id="tg-configured">—</b></div>
+          <div class="kv"><span>微信→TG</span><b id="tg-forward">—</b></div>
+          <div class="kv"><span>TG→微信</span><b id="tg-reply">—</b></div>
+          <button class="btn" id="btn-restart-bridge">重启桥接</button>
+        </div>
+        <div class="card">
+          <h3>显示栈</h3>
+          <div class="kv"><span>Xvfb</span><b id="svc-xvfb">—</b></div>
+          <div class="kv"><span>x11vnc</span><b id="svc-x11vnc">—</b></div>
+          <div class="kv"><span>openbox</span><b id="svc-openbox">—</b></div>
+        </div>
+      </div>
+    </section>
 
-  <!-- 安卓画面 -->
-  <section class="tab" id="tab-android">
-    <div class="card">
+    <!-- 微信画面 -->
+    <section data-pane="screen" class="pane" hidden>
+      <p class="muted">未登录时这里会显示微信二维码，用手机微信扫码登录。掉线后点「进入微信」在手机确认即可。</p>
+      <iframe id="vnc" class="vnc" src="about:blank"></iframe>
+    </section>
+
+    <!-- Telegram -->
+    <section data-pane="telegram" class="pane" hidden>
+      <div class="card" style="max-width:560px">
+        <h3>Telegram 配置</h3>
+        <label>Bot Token
+          <input id="cfg-token" type="password" placeholder="留空表示不修改已保存的 token">
+          <span class="muted" id="cfg-token-mask"></span>
+        </label>
+        <label>Chat ID
+          <input id="cfg-chat" type="text" placeholder="你的 user id 或群 -100... id">
+        </label>
+        <label class="ck"><input type="checkbox" id="cfg-forward"> 微信 → Telegram 转发</label>
+        <label class="ck"><input type="checkbox" id="cfg-reply"> Telegram → 微信 回发</label>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="btn-save-cfg">保存并重启桥接</button>
+          <span id="cfg-msg" class="muted"></span>
+        </div>
+        <p class="muted" style="margin-top:14px">
+          不知道怎么拿 token / chat id？搜 <code>@BotFather</code> 建 bot 拿 token；
+          搜 <code>@userinfobot</code> 拿你的 user id；群 id 把 bot 拉进群后看
+          <code>getUpdates</code>。详见仓库 README。
+        </p>
+      </div>
+    </section>
+
+    <!-- 最近消息 -->
+    <section data-pane="messages" class="pane" hidden>
+      <div class="row"><button class="btn" id="btn-refresh-msg">刷新</button><span class="muted" id="msg-hint"></span></div>
+      <table class="tbl" id="msg-tbl"><thead><tr><th>时间</th><th>会话</th><th>发送者</th><th>内容</th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <!-- 日志 -->
+    <section data-pane="logs" class="pane" hidden>
       <div class="row">
-        <h2 style="margin:0;margin-right:auto">安卓模拟器 <span id="androidState" class="muted" style="font-weight:400"></span></h2>
-        <button class="btn primary" data-android="start">启动</button>
-        <button class="btn" data-android="restart">重启</button>
-        <button class="btn danger" data-android="stop">关机</button>
-      </div>
-      <div id="kvmWarn"></div>
-    </div>
-    <div class="two">
-      <div>
-        <div class="card">
-          <h2>快捷操作</h2>
-          <div class="row">
-            <button class="btn" data-key="home">主页</button>
-            <button class="btn" data-key="back">返回</button>
-            <button class="btn" data-key="recent">多任务</button>
-            <button class="btn" data-key="wake">唤醒</button>
-            <button class="btn" data-key="wechat">打开微信</button>
-            <a class="btn" href="/api/screenshot" target="_blank">截图</a>
-          </div>
-          <h3>向模拟器输入文字</h3>
-          <p class="muted" style="margin:0 0 6px;font-size:12px">先在画面中点一下输入框。纯英文数字走 <code>adb input</code>；含中文时走 uiautomator2 输入法。</p>
-          <div class="row">
-            <input type="text" id="textInput" placeholder="验证码、账号、中文都可以" style="flex:1">
-            <button class="btn primary" id="textSend">发送到模拟器</button>
-          </div>
-        </div>
-        <div class="card">
-          <h2>首次使用</h2>
-          <ol class="howto">
-            <li>先在「设备与微信」页选择机型：<b>手机</b>（小号专用，会挤掉其他手机上的登录）或 <b>平板</b>（Pad 模式，可与你的真手机同时在线）。</li>
-            <li>安装微信（上传官方 APK 或填写下载地址）。</li>
-            <li>在右侧画面中打开微信登录。平板模式会显示二维码，用真手机扫码确认。</li>
-            <li>登录后去「数据库验证」页跑解密验证。</li>
-          </ol>
-        </div>
-      </div>
-      <div class="card">
-        <div class="row" style="margin-bottom:8px">
-          <h2 style="margin:0;margin-right:auto">画面</h2>
-          <a href="#" data-reconnect>重新连接</a>
-          <a href="/novnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=websockify" target="_blank">新窗口打开</a>
-        </div>
-        <div class="vnc-wrap" id="vnc"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 设备与微信 -->
-  <section class="tab" id="tab-device">
-    <div class="two">
-      <div class="card">
-        <h2>设备配置</h2>
-        <form id="deviceForm" onsubmit="return false">
-          <div class="field"><label>机型</label><div>
-            <select name="DEVICE_PROFILE">
-              <option value="phone">手机（720×1280 @320dpi）</option>
-              <option value="tablet">平板（1200×1920 @240dpi，微信 Pad 模式）</option>
-            </select>
-            <div class="help">手机模式会挤掉同账号在其他手机上的登录；平板模式可与真手机同时在线。只影响账号登录方式，不影响后续读取和转发。</div>
-          </div></div>
-          <div class="field"><label>内存 (MB)</label><div><input type="number" name="EMU_RAM_MB" min="2048" max="16384" step="512"></div></div>
-          <div class="field"><label>CPU 核数</label><div><input type="number" name="EMU_CORES" min="1" max="16"></div></div>
-          <div class="field"><label>自定义分辨率（可选）</label><div class="row">
-            <input type="number" name="EMU_WIDTH" placeholder="宽" style="width:90px">
-            <input type="number" name="EMU_HEIGHT" placeholder="高" style="width:90px">
-            <input type="number" name="EMU_DENSITY" placeholder="dpi" style="width:90px">
-            <div class="help" style="width:100%">留空则使用机型默认值。平板需保证 宽÷(dpi÷160) ≥ 600。</div>
-          </div></div>
-          <div class="field"><label>后置摄像头</label><div>
-            <select name="CAMERA_BACK">
-              <option value="none">无</option>
-              <option value="virtualscene">虚拟场景（可把二维码贴在墙上）</option>
-              <option value="webcam0">宿主机摄像头 webcam0（需映射 /dev/video*）</option>
-            </select>
-          </div></div>
-          <div class="sticky-actions row">
-            <button class="btn" id="deviceSave">保存</button>
-            <button class="btn primary" id="deviceSaveRestart">保存并重启模拟器</button>
-            <span class="muted" style="font-size:12px">修改后需重启模拟器生效；已登录的微信数据不会丢失。</span>
-          </div>
-        </form>
-      </div>
-      <div>
-        <div class="card">
-          <h2>微信</h2>
-          <p class="muted" id="wxState" style="margin-top:0"></p>
-          <h3>上传 APK</h3>
-          <label class="btn primary">选择 APK 文件<input type="file" id="apkFile" accept=".apk" hidden></label>
-          <h3>或从地址下载</h3>
-          <div class="row">
-            <input type="text" id="apkUrl" placeholder="从 weixin.qq.com 复制 Android 版下载链接" style="flex:1">
-            <button class="btn" id="apkDownload">下载并安装</button>
-          </div>
-          <div id="jobState" class="muted" style="margin-top:8px"></div>
-          <div class="notice">微信只有 arm64 版本，要靠系统镜像自带的 ARM 指令转译运行（API ≥ 30 的 x86_64 镜像）。安装后看「ABI」一栏是否为 arm64-v8a，并观察运行是否稳定。</div>
-        </div>
-        <div class="card">
-          <h2>看门狗</h2>
-          <label class="row"><input type="checkbox" id="wxWatchdog"> 微信进程退出后自动重新拉起</label>
-          <div id="metrics" class="muted" style="margin-top:8px;font-size:13px"></div>
-          <div class="row" style="margin-top:8px"><button class="btn" data-android="root">执行 adb root</button></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 数据库验证 -->
-  <section class="tab" id="tab-db">
-    <div class="card">
-      <h2>解密验证</h2>
-      <p class="muted" style="margin-top:0">读取 uin → 定位 EnMicroMsg.db → 复制到容器 → 依次尝试 md5(IMEI+uin)[:7] 密钥 → 统计。微信登录后运行。</p>
-      <div class="row">
-        <input type="text" id="imei" placeholder="IMEI（可选，默认会尝试 1234567890ABCDEF 等）" style="flex:1;max-width:420px">
-        <button class="btn primary" id="probeBtn">运行解密验证</button>
-      </div>
-      <div id="probeResult" style="margin-top:10px"></div>
-    </div>
-    <div class="card">
-      <div class="row">
-        <h2 style="margin:0;margin-right:auto">实时监听 <span id="watchState" class="muted" style="font-weight:400"></span></h2>
-        <button class="btn primary" id="watchOn">开始监听</button>
-        <button class="btn" id="watchOff">停止</button>
-      </div>
-      <p class="muted">每 2 秒检查数据库与 WAL 是否变化，有变化就拷贝并读取新消息。请用别的微信号给它发几条消息，看「延迟」列：从消息时间到这里读到的秒数。</p>
-      <div id="feed"></div>
-    </div>
-    <div class="two">
-      <div class="card">
-        <div class="row"><h2 style="margin:0;margin-right:auto">最近消息</h2><button class="btn" id="loadMsgs">刷新</button></div>
-        <div id="msgs" style="margin-top:8px"></div>
-      </div>
-      <div class="card">
-        <div class="row"><h2 style="margin:0;margin-right:auto">会话列表</h2><button class="btn" id="loadConvs">刷新</button></div>
-        <p class="muted" style="font-size:12px;margin:6px 0">点击会话 ID 可以填入「发送验证」页。</p>
-        <div id="convs"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 发送验证 -->
-  <section class="tab" id="tab-send">
-    <div class="card">
-      <h2>界面自动化发送</h2>
-      <p class="muted" style="margin-top:0">用 <code>am start LauncherUI --es Chat_User</code> 打开会话，再通过 uiautomator2 填入文字并点「发送」。建议先发给「文件传输助手」（<code>filehelper</code>）。</p>
-      <div class="field" style="display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center">
-        <label>会话 ID</label><input type="text" id="talker" value="filehelper">
-        <label>文字</label><input type="text" id="sendText" value="wechat2tg P0 发送测试 ✅">
-      </div>
-      <div class="row" style="margin-top:10px"><button class="btn primary" id="sendBtn">发送</button></div>
-      <div id="sendResult" style="margin-top:10px"></div>
-    </div>
-  </section>
-
-  <!-- 扫码 -->
-  <section class="tab" id="tab-scan">
-    <div class="two">
-      <div class="card">
-        <h2>上传二维码</h2>
-        <div id="drop" class="vnc-empty" style="border:2px dashed var(--border);border-radius:12px;height:180px;cursor:pointer;color:var(--muted)">
-          点击选择、拖拽图片到这里，或直接 Ctrl+V 粘贴截图
-        </div>
-        <input type="file" id="scanFile" accept="image/*" hidden>
-        <div id="scanInfo" style="margin-top:10px"></div>
-      </div>
-      <div class="card">
-        <h2>送到模拟器</h2>
-        <label class="row"><input type="checkbox" id="useRegen"> 使用重新生成的清晰二维码（解码成功时可用）</label>
-        <h3>方式一：相册识别（推荐）</h3>
-        <p class="muted" style="margin:0 0 6px;font-size:12px">把图片推送到模拟器相册，然后打开微信「扫一扫」并尝试自动点「相册」，最后在画面里选中最新那张。</p>
-        <div class="row">
-          <button class="btn primary" id="pushGallery" disabled>推送到相册并打开扫一扫</button>
-          <button class="btn" id="openScanner">只打开扫一扫</button>
-        </div>
-        <h3>方式二：虚拟摄像头</h3>
-        <p class="muted" style="margin:0 0 6px;font-size:12px">用于微信不允许从相册识别的码（比如登录确认）。会把图片贴到模拟器虚拟场景的墙上，并把摄像头切到 virtualscene。<b>需要重启模拟器</b>，然后在扫一扫里转动视角（按住 Alt + 鼠标 / WASD）对准墙上的图片。</p>
-        <div class="row"><button class="btn" id="setPoster" disabled>设为摄像头画面并重启模拟器</button></div>
-        <div id="scanResult" style="margin-top:10px"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 日志 -->
-  <section class="tab" id="tab-logs">
-    <div class="card">
-      <div class="row" style="margin-bottom:8px">
-        <select id="logName" style="width:auto">
-          <option value="manager">管理面板</option>
-          <option value="emulator">模拟器</option>
-          <option value="vnc">VNC / Xvfb</option>
+        <select id="log-name">
+          <option value="bridge">bridge</option>
+          <option value="wechat">wechat</option>
+          <option value="manager">manager</option>
+          <option value="display">display</option>
           <option value="supervisord">supervisord</option>
         </select>
-        <button class="btn" id="logRefresh">刷新</button>
+        <button class="btn" id="btn-refresh-log">刷新</button>
+        <label class="ck"><input type="checkbox" id="log-auto"> 自动刷新</label>
       </div>
-      <pre class="log" id="logText"></pre>
-    </div>
-  </section>
-</main>
-<div id="toast"></div>
-<script src="/static/app.js"></script>
+      <pre id="log-out" class="log"></pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
 </body>
 </html>
