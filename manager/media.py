@@ -275,10 +275,8 @@ def save_latest_media(out_name: str, is_video: bool = False) -> str | None:
     bx, by, bw, bh = boxes[-1]                # 最新（最底部）的媒体气泡
     cx, cy = bx + bw // 2, by + bh // 2
     out_path = os.path.join(MEDIA_DIR, out_name)
-    if is_video:
-        ok = _save_video_via_player(cx, cy, out_path)
-    else:
-        ok = _save_via_menu(cx, cy, out_path, is_video=False)
+    # 图片与视频都走「右键→另存为；视频未下载则先左键下载(仅下载不开播放器)→等→右键另存」。
+    ok = _save_via_menu(cx, cy, out_path, is_video=is_video)
     return out_path if ok else None
 
 
