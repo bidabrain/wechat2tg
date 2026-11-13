@@ -23,8 +23,11 @@ except ImportError:
     import send
 
 MEDIA_DIR = os.environ.get("MEDIA_DIR", "/data/media")
-# 对话消息区（绝对坐标，窗口规整到 0,0 后）
-MSG_AREA = (340, 80, 1245, 735)
+# 对话消息【内容】区（绝对坐标，窗口规整到 0,0 后）。
+# 两侧各留出头像列（发送方头像 ~x352-372、自己头像 ~x1215-1255），避免把头像当媒体点到，
+# 误触个人资料/退出登录。接收的媒体从 ~x377 起，发送的媒体到 ~x1203 止。
+MSG_AREA = (375, 95, 1205, 715)
+MIN_MEDIA_PX = 100           # 媒体气泡至少这么大，排除头像(~40px)/小表情
 DISPLAY = ":1"
 
 
@@ -74,9 +77,9 @@ def find_media_regions(png: str) -> list[tuple[int, int, int, int]]:
                     if 0 <= ny < rows and 0 <= nx < cols and grid[ny][nx] and not seen[ny][nx]:
                         seen[ny][nx] = True; st.append((ny, nx))
             xs = [c[1] for c in cells]; ys = [c[0] for c in cells]
-            w, h = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
-            if w >= 4 and h >= 4:
-                boxes.append((X0 + min(xs) * CELL, Y0 + min(ys) * CELL, w * CELL, h * CELL))
+            w, h = (max(xs) - min(xs) + 1) * CELL, (max(ys) - min(ys) + 1) * CELL
+            if w >= MIN_MEDIA_PX and h >= MIN_MEDIA_PX:   # 只认大块媒体
+                boxes.append((X0 + min(xs) * CELL, Y0 + min(ys) * CELL, w, h))
     boxes.sort(key=lambda b: b[1] + b[3])   # 底部 y 升序，最后一个是最新
     return boxes
 
@@ -118,51 +121,58 @@ def _X(*a):
     return subprocess.run(["xdotool", *a], capture_output=True, text=True, env=_env())
 
 
-def _close_player():
-    """关掉可能打开的「图片和视频」播放器窗口。"""
-    _X("key", "Escape")
-    time.sleep(0.2)
-    for wid in _X("search", "--name", "图片和视频").stdout.split():
-        _X("windowclose", wid)
-    time.sleep(0.3)
-
-
 def _rightclick_find_save(cx: int, cy: int) -> tuple[int, int] | None:
-    """右键 (cx,cy)，OCR 找「另存为」坐标；找不到返回 None（并已关闭菜单）。"""
+    """右键 (cx,cy)，OCR 在菜单带内找「另存为」坐标。
+    找到 → 返回坐标且【保留菜单打开】；找不到 → Escape 关菜单并返回 None。
+    安全：OCR 结果必须落在光标正下方的菜单带内，否则视为误识别。"""
     _X("mousemove", str(cx), str(cy)); time.sleep(0.3)
     _X("click", "3"); time.sleep(0.8)
-    region = (cx, cy, min(260, 1280 - cx), min(400, 800 - cy))
+    region = (cx, cy, min(220, 1280 - cx), min(360, 800 - cy))
     pos = _ocr_menu_item(region, "另存")
+    if pos and (pos[1] <= cy or pos[0] < cx - 10 or pos[0] > cx + 230):
+        pos = None                            # 位置异常，视为误识别
     if not pos:
-        _X("key", "Escape"); time.sleep(0.2)
-    return pos
+        _X("key", "Escape"); time.sleep(0.2)  # 没找到才关菜单
+    return pos                                # 找到则保留菜单打开，供点击
+
+
+def _save_dialog_open() -> bool:
+    """等待「另存为」保存对话框出现，最多 ~3s。"""
+    for _ in range(10):
+        if _X("search", "--name", "另存为").stdout.strip():
+            return True
+        time.sleep(0.3)
+    return False
 
 
 def _save_via_menu(cx: int, cy: int, out_path: str, is_video: bool = False) -> bool:
     """右键消息 → 另存为 → 保存到 out_path。
-    视频未下载时右键无「另存为」：先左键触发下载，反复检测直到出现，再另存。"""
+    视频未下载时右键无「另存为」：安全地左键一次触发下载 → Escape 关播放器 → 固定等待
+    → 再右键一次另存。全程不 windowclose、不循环乱点，避免误触个人资料/退出登录。
+    关键安全：点「另存为」后必须确认保存对话框真打开，否则绝不往聊天框打字（避免把路径发出去）。"""
     pos = _rightclick_find_save(cx, cy)
     if not pos and is_video:
-        # 左键点击触发下载（会打开播放器），等下载完成（「另存为」出现）
         _X("mousemove", str(cx), str(cy)); time.sleep(0.2)
-        _X("click", "1"); time.sleep(1.0)
-        for _ in range(20):                 # 最多等 ~30s
-            _close_player()
+        _X("click", "1"); time.sleep(1.0)     # 左键一次触发下载（可能开播放器）
+        _X("key", "Escape"); time.sleep(0.5)  # 仅用 Escape 关播放器，绝不 windowclose
+        for _ in range(8):                    # 等下载，最多 ~16s
+            time.sleep(2.0)
             pos = _rightclick_find_save(cx, cy)
             if pos:
                 break
-            time.sleep(1.2)
     if not pos:
         return False
     _X("mousemove", str(pos[0]), str(pos[1])); time.sleep(0.2)
-    _X("click", "1"); time.sleep(1.2)       # 点另存为 → 弹保存对话框
+    _X("click", "1")                          # 菜单仍打开，点「另存为」→ 弹对话框
+    if not _save_dialog_open():
+        _X("key", "Escape"); time.sleep(0.2)  # 对话框没开：绝不在聊天框打字
+        return False
     _X("key", "ctrl+a"); time.sleep(0.2)
     _X("type", "--delay", "12", out_path); time.sleep(0.3)
     _X("key", "Return"); time.sleep(1.5)
-    # 视频可能边下边存，等文件大小稳定
-    if is_video:
+    if is_video:                              # 视频可能边下边存，等大小稳定
         last = -1
-        for _ in range(30):                 # 最多等 ~15s
+        for _ in range(30):
             if os.path.exists(out_path):
                 sz = os.path.getsize(out_path)
                 if sz > 0 and sz == last:
