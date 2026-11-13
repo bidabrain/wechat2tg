@@ -114,13 +114,13 @@ def _ocr_menu_item(region: tuple[int, int, int, int], target: str) -> tuple[int,
     return None
 
 
-def _save_via_menu(cx: int, cy: int, out_path: str) -> bool:
-    """在 (cx,cy) 右键消息 → 另存为 → 保存到 out_path。"""
+def _save_via_menu(cx: int, cy: int, out_path: str, is_video: bool = False) -> bool:
+    """在 (cx,cy) 右键消息 → 另存为 → 保存到 out_path。视频等待下载完成（文件大小稳定）。"""
     X = lambda *a: subprocess.run(["xdotool", *a], capture_output=True, env=_env())
     X("mousemove", str(cx), str(cy)); time.sleep(0.3)
     X("click", "3"); time.sleep(0.8)        # 右键
     # 菜单出现在光标附近，向下延伸；在光标右下方区域 OCR 找「另存为」
-    region = (cx, cy, min(260, 1280 - cx), min(380, 800 - cy))
+    region = (cx, cy, min(260, 1280 - cx), min(400, 800 - cy))
     pos = _ocr_menu_item(region, "另存")
     if not pos:
         X("key", "Escape")
@@ -131,11 +131,22 @@ def _save_via_menu(cx: int, cy: int, out_path: str) -> bool:
     X("key", "ctrl+a"); time.sleep(0.2)
     X("type", "--delay", "12", out_path); time.sleep(0.3)
     X("key", "Return"); time.sleep(1.5)
+    # 视频可能边下边存，等文件大小稳定
+    if is_video:
+        last = -1
+        for _ in range(30):                 # 最多等 ~15s
+            if os.path.exists(out_path):
+                sz = os.path.getsize(out_path)
+                if sz > 0 and sz == last:
+                    break
+                last = sz
+            time.sleep(0.5)
     return os.path.exists(out_path) and os.path.getsize(out_path) > 0
 
 
-def save_latest_image(out_name: str) -> str | None:
-    """在【当前已打开的会话】里把最新的图片另存到临时目录，返回路径。"""
+def save_latest_media(out_name: str, is_video: bool = False) -> str | None:
+    """在【当前已打开的会话】里把最新的图片/视频另存到临时目录，返回路径。
+    图片与视频的右键菜单结构一致（都有「另存为」）；视频已下载时可直接另存。"""
     os.makedirs(MEDIA_DIR, exist_ok=True)
     win = send._wechat_win()
     if not win:
@@ -156,6 +167,10 @@ def save_latest_image(out_name: str) -> str | None:
         return None
     bx, by, bw, bh = boxes[-1]                # 最新（最底部）的媒体气泡
     out_path = os.path.join(MEDIA_DIR, out_name)
-    if _save_via_menu(bx + bw // 2, by + bh // 2, out_path):
+    if _save_via_menu(bx + bw // 2, by + bh // 2, out_path, is_video=is_video):
         return out_path
     return None
+
+
+def save_latest_image(out_name: str) -> str | None:   # 向后兼容
+    return save_latest_media(out_name, is_video=False)

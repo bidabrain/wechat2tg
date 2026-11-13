@@ -125,26 +125,31 @@ class Bridge:
                                            # 从微信客户端/手机发的自己消息照常转发
         asyncio.run_coroutine_threadsafe(self._send_tg(m), self.loop)
 
-    def _grab_image(self, m: Message) -> str | None:
-        """打开会话并把最新图片另存到临时目录（UI 自动化，阻塞，串行化）。"""
+    def _grab_media(self, m: Message, is_video: bool) -> str | None:
+        """打开会话并把最新图片/视频另存到临时目录（UI 自动化，阻塞，串行化）。"""
         with send._LOCK:
             win = send._wechat_win()
             if not win or not send._open_chat(win, m.chat_name):
                 return None
-            return media.save_latest_image(f"wx_{m.table[:8]}_{m.local_id}.jpg")
+            ext = "mp4" if is_video else "jpg"
+            return media.save_latest_media(f"wx_{m.table[:8]}_{m.local_id}.{ext}", is_video=is_video)
 
     async def _send_tg(self, m: Message):
         try:
             tid = await self._topic_for(m.chat_id, m.chat_name)
             prefix = f"{m.sender_name}:\n" if (m.is_group and m.sender_name) else ("🟢 我：" if m.is_self else "")
-            # 图片：抓取解密文件发为 photo；失败回退占位文本
-            if m.type == 3 and self.cfg.get("media_enabled", True):
-                path = await asyncio.to_thread(self._grab_image, m)
+            cap = prefix.strip(" :\n") or None
+            # 图片(3)/视频(43)：抓取解密文件发为 photo/video；失败回退占位文本
+            if m.type in (3, 43) and self.cfg.get("media_enabled", True):
+                is_video = m.type == 43
+                path = await asyncio.to_thread(self._grab_media, m, is_video)
                 if path:
                     try:
                         with open(path, "rb") as f:
-                            await self.app.bot.send_photo(self.chat_id, f, message_thread_id=tid,
-                                                          caption=(prefix.strip(" :\n") or None))
+                            if is_video:
+                                await self.app.bot.send_video(self.chat_id, f, message_thread_id=tid, caption=cap)
+                            else:
+                                await self.app.bot.send_photo(self.chat_id, f, message_thread_id=tid, caption=cap)
                         return
                     finally:
                         try:
