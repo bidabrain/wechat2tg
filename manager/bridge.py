@@ -49,6 +49,7 @@ class Bridge:
         self._load_topics()
         # 桥接刚发到微信的消息 [(chat_id, 规范化文本, 时间)]，用于只过滤桥接自身的回声
         self._recent_sent: list[tuple[str, str, float]] = []
+        self._fresh_topics: set[int] = set()   # 刚建的 topic，首条消息发完再清一次置顶
         self.col = Collector(self.home, on_message=self._on_wx)
 
     @staticmethod
@@ -104,6 +105,12 @@ class Bridge:
             self.map[chat_id] = {"topic_id": tid, "name": chat_name}
             self.rev[tid] = chat_id
             self._save_topics()
+            self._fresh_topics.add(tid)
+            # 清除可能被自动置顶的消息（部分客户端会把 topic 首条/创建消息置顶）
+            try:
+                await self.app.bot.unpin_all_forum_topic_messages(self.chat_id, tid)
+            except Exception:  # noqa: BLE001
+                pass
             return tid
 
     # -------------------------------------------------- 微信 → TG
@@ -126,6 +133,13 @@ class Bridge:
             elif tid is None:
                 text = f"【{m.chat_name}】{text}"   # 没有 topic 时带上会话名
             await self.app.bot.send_message(self.chat_id, text, message_thread_id=tid)
+            # 新建 topic 的首条消息发完，再清一次置顶（有的客户端会把首条自动置顶）
+            if tid in self._fresh_topics:
+                self._fresh_topics.discard(tid)
+                try:
+                    await self.app.bot.unpin_all_forum_topic_messages(self.chat_id, tid)
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as e:  # noqa: BLE001
             print("发送到 TG 失败:", e, flush=True)
 
@@ -216,6 +230,12 @@ class Bridge:
             ])
         except Exception as e:  # noqa: BLE001
             print("设置命令菜单失败:", e, flush=True)
+        # 清除已存在 topic 里可能遗留的置顶
+        for info in list(self.map.values()):
+            try:
+                await self.app.bot.unpin_all_forum_topic_messages(self.chat_id, info["topic_id"])
+            except Exception:  # noqa: BLE001
+                pass
         try:
             await self.app.bot.send_message(self.chat_id, "✅ wechat2tg 桥接已连接（Topic 模式）。")
         except Exception as e:  # noqa: BLE001
