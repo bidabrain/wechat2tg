@@ -27,6 +27,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl locales tzdata supervisor procps psmisc \
       xvfb x11vnc novnc websockify openbox xdotool xclip x11-utils xauth dbus-x11 \
+      scrot tesseract-ocr tesseract-ocr-chi-sim \
       fonts-noto-cjk fonts-noto-color-emoji \
       python3 python3-venv sqlite3 inotify-tools \
       libatomic1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
