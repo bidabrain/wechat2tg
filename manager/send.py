@@ -30,7 +30,31 @@ def _env() -> dict:
     return {**os.environ, "DISPLAY": DISPLAY}
 
 
+# 危险区：左侧边栏/头像列 (x<62) 会误触个人资料→退出登录、切到联系人页；
+# 顶部标题栏 (y<26) 有最小化/关闭。任何 click 落在这些区域一律拒绝。
+SAFE_MIN_X = 62
+SAFE_MIN_Y = 26
+
+
+def _pointer() -> tuple[int, int]:
+    out = subprocess.run(["xdotool", "getmouselocation", "--shell"],
+                         capture_output=True, text=True, env=_env()).stdout
+    x = y = 0
+    for line in out.splitlines():
+        if line.startswith("X="):
+            x = int(line[2:])
+        elif line.startswith("Y="):
+            y = int(line[2:])
+    return x, y
+
+
 def _x(*args: str) -> subprocess.CompletedProcess:
+    # 点击前的安全护栏：指针在危险区则拒绝点击，避免误触退出登录/切页/关窗
+    if args and args[0] == "click":
+        px, py = _pointer()
+        if px < SAFE_MIN_X or py < SAFE_MIN_Y:
+            print(f"[send] 安全护栏：拒绝在危险区点击 ({px},{py})", flush=True)
+            return subprocess.CompletedProcess(args, 0, "", "")
     return subprocess.run(["xdotool", *args], capture_output=True, text=True, env=_env())
 
 

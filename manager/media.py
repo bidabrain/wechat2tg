@@ -118,7 +118,7 @@ def _ocr_menu_item(region: tuple[int, int, int, int], target: str) -> tuple[int,
 
 
 def _X(*a):
-    return subprocess.run(["xdotool", *a], capture_output=True, text=True, env=_env())
+    return send._x(*a)        # 复用 send 的点击安全护栏（拒绝危险区点击）
 
 
 def _rightclick_find_save(cx: int, cy: int) -> tuple[int, int] | None:
