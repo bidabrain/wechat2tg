@@ -221,6 +221,35 @@ class Bridge:
             except OSError:
                 pass
 
+    async def on_tg_video(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """TG topic 里发来的视频 → 下载 → 用「发送文件」发回对应微信会话（.mp4 按视频发）。"""
+        if not self.cfg.get("reply_enabled", True):
+            return
+        msg = update.effective_message
+        tid = msg.message_thread_id if msg else None
+        chat_id = self.rev.get(tid) if tid else None
+        media_obj = (msg.video or msg.animation) if msg else None
+        if not chat_id or not media_obj:
+            return
+        name = self.map[chat_id]["name"]
+        tmp = DATA / "media" / f"tg_{msg.message_id}.mp4"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            tgf = await media_obj.get_file()
+            await tgf.download_to_drive(str(tmp))
+            r = await asyncio.to_thread(send.send_file_to_chat, name, chat_id, str(tmp))
+            if r.get("ok"):
+                self._recent_sent.append((chat_id, "\x00MEDIA", time.time()))
+            else:
+                await msg.reply_text(f"❌ 视频发送失败：{r.get('msg')}")
+        except Exception as e:  # noqa: BLE001
+            await msg.reply_text(f"❌ 视频发送异常：{e}")
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
     # -------------------------------------------------- 命令：发起新对话 / 查联系人
     async def cmd_contacts(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kw = " ".join(ctx.args) if ctx.args else ""
@@ -276,6 +305,8 @@ class Bridge:
             filters.Chat(self.chat_id) & filters.TEXT & ~filters.COMMAND, self.on_tg_message))
         self.app.add_handler(MessageHandler(
             filters.Chat(self.chat_id) & filters.PHOTO, self.on_tg_photo))
+        self.app.add_handler(MessageHandler(
+            filters.Chat(self.chat_id) & (filters.VIDEO | filters.ANIMATION), self.on_tg_video))
         self.loop = asyncio.get_running_loop()
         threading.Thread(target=self._collector_loop, daemon=True).start()
         print(f"[bridge] 已启动，目标群 chat_id={self.chat_id}，已载入 {len(self.map)} 个 topic 映射", flush=True)

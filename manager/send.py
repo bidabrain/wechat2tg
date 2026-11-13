@@ -22,6 +22,9 @@ WIN_W, WIN_H = 1280, 800
 SEARCH_XY = (168, 60)      # 搜索框
 RESULT_XY = (165, 141)     # 搜索下拉第一个匹配项（联系人/会话）
 INPUT_XY = (768, 700)      # 聊天输入框
+FILE_BTN_XY = (419, 768)   # 底部工具栏「发送文件」按钮
+DLG_NAME_XY = (628, 568)   # 文件对话框 文件名字段
+SEND_BTN_XY = (1232, 768)  # 「发送」按钮
 TITLE_REGION = (326, 45, 320, 32)   # 聊天标题栏（OCR 核对用）：x, y, 宽, 高
 _LOCK = threading.Lock()
 
@@ -258,6 +261,40 @@ def send_image_to_chat(chat_name: str, chat_id: str, image_path: str) -> dict:
         time.sleep(0.3)
         _paste_send()
         return {"ok": True, "step": "sent", "msg": "已发送图片"}
+
+
+def _file_dialog_open() -> bool:
+    """等待「选择文件」对话框出现，最多 ~3s。"""
+    for _ in range(10):
+        if _x("search", "--name", "选择文件").stdout.strip():
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def send_file_to_chat(chat_name: str, chat_id: str, file_path: str) -> dict:
+    """打开会话（OCR 标题核对）→ 发送文件按钮 → 文件对话框输入绝对路径 → 发送。
+    微信会按文件类型发送（.mp4 以视频形式、图片以图片形式）。核对不通过不发。"""
+    with _LOCK:
+        win = _wechat_win()
+        if not win:
+            return {"ok": False, "step": "find_window", "msg": "找不到微信窗口"}
+        _normalize(win)
+        if not _open_chat(win, chat_name):
+            return {"ok": False, "step": "verify", "msg": f"未能定位会话「{chat_name}」（已避免误发）"}
+        _click(*FILE_BTN_XY)
+        if not _file_dialog_open():
+            return {"ok": False, "step": "dialog", "msg": "未弹出文件选择对话框"}
+        _click(*DLG_NAME_XY)        # 文件名字段
+        _x("key", "ctrl+a")
+        _x("key", "Delete")
+        _x("type", "--delay", "12", file_path)
+        time.sleep(0.3)
+        _x("key", "Return")         # 选中文件 → 附加到输入框
+        time.sleep(1.0)
+        _click(*SEND_BTN_XY)        # 发送
+        time.sleep(0.5)
+        return {"ok": True, "step": "sent", "msg": "已发送文件"}
 
 
 def send_text(target: str, text: str) -> dict:
