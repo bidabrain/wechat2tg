@@ -63,11 +63,9 @@ docker compose up -d
 
 1. 在 Telegram 里搜索 **@BotFather**（官方，带蓝标），开始对话。
 2. 发送 `/newbot`，按提示设置 bot 名称和用户名（用户名必须以 `bot` 结尾，如 `my_wx2tg_bot`）。
-3. BotFather 会返回一串 **token**，形如：
-   ```
-   123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
-   ```
-   这就是 `TG_BOT_TOKEN`。妥善保存，别泄露。
+3. BotFather 会返回一串 **token**，格式是「一串数字」+ 冒号 + 「一串字母数字」
+   （例如 `110000000` 冒号 `AAFxxxx…` 共约 46 个字符）。这就是 `TG_BOT_TOKEN`。
+   妥善保存，**切勿提交到代码仓库或公开分享**。
 
 ### 第二步：拿到你的 User ID
 
