@@ -114,23 +114,51 @@ def _ocr_menu_item(region: tuple[int, int, int, int], target: str) -> tuple[int,
     return None
 
 
-def _save_via_menu(cx: int, cy: int, out_path: str, is_video: bool = False) -> bool:
-    """在 (cx,cy) 右键消息 → 另存为 → 保存到 out_path。视频等待下载完成（文件大小稳定）。"""
-    X = lambda *a: subprocess.run(["xdotool", *a], capture_output=True, env=_env())
-    X("mousemove", str(cx), str(cy)); time.sleep(0.3)
-    X("click", "3"); time.sleep(0.8)        # 右键
-    # 菜单出现在光标附近，向下延伸；在光标右下方区域 OCR 找「另存为」
+def _X(*a):
+    return subprocess.run(["xdotool", *a], capture_output=True, text=True, env=_env())
+
+
+def _close_player():
+    """关掉可能打开的「图片和视频」播放器窗口。"""
+    _X("key", "Escape")
+    time.sleep(0.2)
+    for wid in _X("search", "--name", "图片和视频").stdout.split():
+        _X("windowclose", wid)
+    time.sleep(0.3)
+
+
+def _rightclick_find_save(cx: int, cy: int) -> tuple[int, int] | None:
+    """右键 (cx,cy)，OCR 找「另存为」坐标；找不到返回 None（并已关闭菜单）。"""
+    _X("mousemove", str(cx), str(cy)); time.sleep(0.3)
+    _X("click", "3"); time.sleep(0.8)
     region = (cx, cy, min(260, 1280 - cx), min(400, 800 - cy))
     pos = _ocr_menu_item(region, "另存")
     if not pos:
-        X("key", "Escape")
+        _X("key", "Escape"); time.sleep(0.2)
+    return pos
+
+
+def _save_via_menu(cx: int, cy: int, out_path: str, is_video: bool = False) -> bool:
+    """右键消息 → 另存为 → 保存到 out_path。
+    视频未下载时右键无「另存为」：先左键触发下载，反复检测直到出现，再另存。"""
+    pos = _rightclick_find_save(cx, cy)
+    if not pos and is_video:
+        # 左键点击触发下载（会打开播放器），等下载完成（「另存为」出现）
+        _X("mousemove", str(cx), str(cy)); time.sleep(0.2)
+        _X("click", "1"); time.sleep(1.0)
+        for _ in range(20):                 # 最多等 ~30s
+            _close_player()
+            pos = _rightclick_find_save(cx, cy)
+            if pos:
+                break
+            time.sleep(1.2)
+    if not pos:
         return False
-    X("mousemove", str(pos[0]), str(pos[1])); time.sleep(0.2)
-    X("click", "1"); time.sleep(1.2)        # 点另存为 → 弹保存对话框
-    # 保存对话框：文件名字段已聚焦，全选后输入绝对路径回车
-    X("key", "ctrl+a"); time.sleep(0.2)
-    X("type", "--delay", "12", out_path); time.sleep(0.3)
-    X("key", "Return"); time.sleep(1.5)
+    _X("mousemove", str(pos[0]), str(pos[1])); time.sleep(0.2)
+    _X("click", "1"); time.sleep(1.2)       # 点另存为 → 弹保存对话框
+    _X("key", "ctrl+a"); time.sleep(0.2)
+    _X("type", "--delay", "12", out_path); time.sleep(0.3)
+    _X("key", "Return"); time.sleep(1.5)
     # 视频可能边下边存，等文件大小稳定
     if is_video:
         last = -1
