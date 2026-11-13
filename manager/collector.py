@@ -163,6 +163,35 @@ class Collector:
         c = self.contacts().get(wxid)
         return c["name"] if c else wxid
 
+    def search_contacts(self, keyword: str, limit: int = 30) -> list[dict]:
+        """在【全部联系人/群】里按关键词搜（备注/昵称/微信号），类似微信搜索框。"""
+        kw = (keyword or "").strip()
+        if not kw:
+            return []
+        out = self._decrypt("contact/contact.db")
+        if not out:
+            return []
+        like = f"%{kw}%"
+        c = sqlite3.connect(out)
+        try:
+            cur = c.execute(
+                "SELECT username, remark, nick_name, alias FROM contact "
+                "WHERE delete_flag=0 AND (remark LIKE ? OR nick_name LIKE ? OR alias LIKE ? OR username LIKE ?) "
+                "LIMIT ?", (like, like, like, like, limit * 2))
+        except sqlite3.OperationalError:
+            c.close()
+            return []
+        rows: list[dict] = []
+        for uname, remark, nick, alias in cur:
+            if not uname or uname.startswith(("gh_", "@")) or "placeholder" in uname:
+                continue
+            name = (remark or "").strip() or (nick or "").strip() or (alias or "") or uname
+            rows.append({"username": uname, "name": name, "is_group": uname.endswith("@chatroom")})
+            if len(rows) >= limit:
+                break
+        c.close()
+        return rows
+
     def list_sessions(self, keyword: str = "", limit: int = 40) -> list[dict]:
         """列出最近会话 [{username, name, is_group}]，可按关键词（名字或 id）过滤。"""
         out = self._decrypt("session/session.db")

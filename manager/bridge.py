@@ -159,15 +159,30 @@ class Bridge:
         await update.effective_message.reply_text(
             "最近会话（用 /to 名字 内容 发起对话）：\n" + "\n".join(lines[:40]))
 
+    async def cmd_search(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        kw = " ".join(ctx.args) if ctx.args else ""
+        if not kw:
+            await update.effective_message.reply_text("用法：/search 关键词（搜全部联系人和群）")
+            return
+        rows = await asyncio.to_thread(self.col.search_contacts, kw, 30)
+        if not rows:
+            await update.effective_message.reply_text(f"没搜到「{kw}」。")
+            return
+        lines = [("👥 " if r["is_group"] else "👤 ") + r["name"] for r in rows]
+        await update.effective_message.reply_text(
+            f"「{kw}」的结果（用 /to 名字 内容 发起对话）：\n" + "\n".join(lines))
+
     async def cmd_to(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg = update.effective_message
         if len(ctx.args) < 2:
             await msg.reply_text("用法：/to 联系人名 消息内容\n不知道名字用 /contacts [关键词] 查。")
             return
         name, text = ctx.args[0], " ".join(ctx.args[1:])
-        rows = await asyncio.to_thread(self.col.list_sessions, name, 5)
+        rows = await asyncio.to_thread(self.col.search_contacts, name, 5)
         if not rows:
-            await msg.reply_text(f"没找到「{name}」。用 /contacts 查确切名字。")
+            rows = await asyncio.to_thread(self.col.list_sessions, name, 5)
+        if not rows:
+            await msg.reply_text(f"没找到「{name}」。用 /search 关键词 查确切名字。")
             return
         target = rows[0]
         r = await asyncio.to_thread(send.send_to_chat, target["name"], target["username"], text)
@@ -182,6 +197,7 @@ class Bridge:
     async def run(self):
         self.app = Application.builder().token(self.cfg["tg_bot_token"]).build()
         self.app.add_handler(CommandHandler("contacts", self.cmd_contacts, filters.Chat(self.chat_id)))
+        self.app.add_handler(CommandHandler("search", self.cmd_search, filters.Chat(self.chat_id)))
         self.app.add_handler(CommandHandler("to", self.cmd_to, filters.Chat(self.chat_id)))
         self.app.add_handler(MessageHandler(
             filters.Chat(self.chat_id) & filters.TEXT & ~filters.COMMAND, self.on_tg_message))
@@ -194,7 +210,8 @@ class Bridge:
         try:
             # 用当前命令覆盖掉旧 bot 程序残留的命令菜单
             await self.app.bot.set_my_commands([
-                BotCommand("contacts", "查最近会话（可带关键词）"),
+                BotCommand("search", "搜全部联系人/群：/search 关键词"),
+                BotCommand("contacts", "最近会话（可带关键词）"),
                 BotCommand("to", "发起对话：/to 名字 消息"),
             ])
         except Exception as e:  # noqa: BLE001
