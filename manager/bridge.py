@@ -28,7 +28,7 @@ except ImportError:  # 独立运行
     from common import DATA
 
 from telegram import Update
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 POLL_CONFIG_SEC = 5
 TOPICS_PATH = DATA / "topics.json"
@@ -148,9 +148,41 @@ class Bridge:
         else:
             await msg.reply_text(f"❌ 发送失败：{r.get('msg')}")
 
+    # -------------------------------------------------- 命令：发起新对话 / 查联系人
+    async def cmd_contacts(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        kw = " ".join(ctx.args) if ctx.args else ""
+        rows = await asyncio.to_thread(self.col.list_sessions, kw, 40)
+        if not rows:
+            await update.effective_message.reply_text("没找到匹配的会话。")
+            return
+        lines = [("👥 " if r["is_group"] else "👤 ") + r["name"] for r in rows]
+        await update.effective_message.reply_text(
+            "最近会话（用 /to 名字 内容 发起对话）：\n" + "\n".join(lines[:40]))
+
+    async def cmd_to(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if len(ctx.args) < 2:
+            await msg.reply_text("用法：/to 联系人名 消息内容\n不知道名字用 /contacts [关键词] 查。")
+            return
+        name, text = ctx.args[0], " ".join(ctx.args[1:])
+        rows = await asyncio.to_thread(self.col.list_sessions, name, 5)
+        if not rows:
+            await msg.reply_text(f"没找到「{name}」。用 /contacts 查确切名字。")
+            return
+        target = rows[0]
+        r = await asyncio.to_thread(send.send_to_chat, target["name"], target["username"], text)
+        if not r.get("ok"):
+            await msg.reply_text(f"❌ 发送失败：{r.get('msg')}")
+            return
+        self._recent_sent.append((target["username"], self._norm(text), time.time()))
+        tid = await self._topic_for(target["username"], target["name"])
+        await msg.reply_text(f"✅ 已发给「{target['name']}」" + ("，后续消息见对应 topic。" if tid else "。"))
+
     # -------------------------------------------------- 运行
     async def run(self):
         self.app = Application.builder().token(self.cfg["tg_bot_token"]).build()
+        self.app.add_handler(CommandHandler("contacts", self.cmd_contacts, filters.Chat(self.chat_id)))
+        self.app.add_handler(CommandHandler("to", self.cmd_to, filters.Chat(self.chat_id)))
         self.app.add_handler(MessageHandler(
             filters.Chat(self.chat_id) & filters.TEXT & ~filters.COMMAND, self.on_tg_message))
         self.loop = asyncio.get_running_loop()

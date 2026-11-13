@@ -163,6 +163,33 @@ class Collector:
         c = self.contacts().get(wxid)
         return c["name"] if c else wxid
 
+    def list_sessions(self, keyword: str = "", limit: int = 40) -> list[dict]:
+        """列出最近会话 [{username, name, is_group}]，可按关键词（名字或 id）过滤。"""
+        out = self._decrypt("session/session.db")
+        if not out:
+            return []
+        contacts = self.contacts()
+        kw = keyword.strip().lower()
+        rows: list[dict] = []
+        c = sqlite3.connect(out)
+        try:
+            cur = c.execute("SELECT username FROM SessionTable ORDER BY sort_timestamp DESC")
+        except sqlite3.OperationalError:
+            c.close()
+            return []
+        SKIP = ("gh_", "@placeholder", "brandsessionholder", "notifymessage", "weixin")
+        for (uname,) in cur:
+            if not uname or any(uname.startswith(s) or s in uname for s in SKIP):
+                continue
+            name = contacts.get(uname, {}).get("name", uname)
+            if kw and kw not in name.lower() and kw not in uname.lower():
+                continue
+            rows.append({"username": uname, "name": name, "is_group": uname.endswith("@chatroom")})
+            if len(rows) >= limit:
+                break
+        c.close()
+        return rows
+
     # -------------------------------------------------------------- 快照/解析
     def snapshot(self) -> dict[tuple[str, int], Message]:
         """返回 {(表, local_id): Message}，覆盖所有消息库。"""
