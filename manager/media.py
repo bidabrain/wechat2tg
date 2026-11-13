@@ -182,9 +182,78 @@ def _save_via_menu(cx: int, cy: int, out_path: str, is_video: bool = False) -> b
     return os.path.exists(out_path) and os.path.getsize(out_path) > 0
 
 
+def _player_window() -> str | None:
+    for wid in _X("search", "--name", "图片和视频").stdout.split():
+        return wid
+    return None
+
+
+def _close_player():
+    _X("key", "Escape"); time.sleep(0.3)
+    for wid in _X("search", "--name", "图片和视频").stdout.split():
+        _X("windowclose", wid)          # 只关播放器窗口（非主窗口），安全
+    time.sleep(0.3)
+
+
+def _save_video_via_player(cx: int, cy: int, out_path: str) -> bool:
+    """按用户方案：左键视频 → 打开播放器 → 在播放器中央右键 → 另存为。
+    在独立播放器里操作，远离边栏/头像，避免误触退出登录。"""
+    _X("mousemove", str(cx), str(cy)); time.sleep(0.2)
+    _X("click", "1")                     # 左键打开播放器（未下载则边播边下）
+    # 等播放器窗口出现
+    wid = None
+    for _ in range(15):
+        time.sleep(1.0)
+        wid = _player_window()
+        if wid:
+            break
+    if not wid:
+        return False
+    # 播放器中央右键
+    g = _X("getwindowgeometry", "--shell", wid).stdout
+    gx = gy = gw = gh = 0
+    for line in g.splitlines():
+        if line.startswith("X="): gx = int(line[2:])
+        elif line.startswith("Y="): gy = int(line[2:])
+        elif line.startswith("WIDTH="): gw = int(line[6:])
+        elif line.startswith("HEIGHT="): gh = int(line[7:])
+    pcx, pcy = gx + gw // 2, gy + gh // 2
+    pos = None
+    for _ in range(8):                   # 等视频下载好、菜单里出现「另存为」
+        _X("mousemove", str(pcx), str(pcy)); time.sleep(0.2)
+        _X("click", "3"); time.sleep(0.8)
+        region = (max(pcx - 20, 0), pcy, min(260, 1280 - pcx), min(360, 800 - pcy))
+        pos = _ocr_menu_item(region, "另存")
+        if pos and pos[0] >= 62 and pos[1] > pcy - 10:
+            break
+        pos = None
+        _X("key", "Escape"); time.sleep(1.5)
+    if not pos:
+        _close_player()
+        return False
+    _X("mousemove", str(pos[0]), str(pos[1])); time.sleep(0.2)
+    _X("click", "1")                     # 菜单仍打开，点「另存为」
+    if not _save_dialog_open():
+        _X("key", "Escape"); _close_player()
+        return False
+    _X("key", "ctrl+a"); time.sleep(0.2)
+    _X("type", "--delay", "12", out_path); time.sleep(0.3)
+    _X("key", "Return"); time.sleep(1.5)
+    last = -1
+    for _ in range(30):                  # 等文件大小稳定（边下边存）
+        if os.path.exists(out_path):
+            sz = os.path.getsize(out_path)
+            if sz > 0 and sz == last:
+                break
+            last = sz
+        time.sleep(0.5)
+    _close_player()
+    return os.path.exists(out_path) and os.path.getsize(out_path) > 0
+
+
 def save_latest_media(out_name: str, is_video: bool = False) -> str | None:
     """在【当前已打开的会话】里把最新的图片/视频另存到临时目录，返回路径。
-    图片与视频的右键菜单结构一致（都有「另存为」）；视频已下载时可直接另存。"""
+    图片：聊天里右键→另存为。视频：左键开播放器→播放器内右键→另存为（更安全）。"""
     os.makedirs(MEDIA_DIR, exist_ok=True)
     win = send._wechat_win()
     if not win:
@@ -204,10 +273,13 @@ def save_latest_media(out_name: str, is_video: bool = False) -> str | None:
     if not boxes:
         return None
     bx, by, bw, bh = boxes[-1]                # 最新（最底部）的媒体气泡
+    cx, cy = bx + bw // 2, by + bh // 2
     out_path = os.path.join(MEDIA_DIR, out_name)
-    if _save_via_menu(bx + bw // 2, by + bh // 2, out_path, is_video=is_video):
-        return out_path
-    return None
+    if is_video:
+        ok = _save_video_via_player(cx, cy, out_path)
+    else:
+        ok = _save_via_menu(cx, cy, out_path, is_video=False)
+    return out_path if ok else None
 
 
 def save_latest_image(out_name: str) -> str | None:   # 向后兼容
