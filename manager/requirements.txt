@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+PyYAML==6.0.2
+qrcode==8.0
+Pillow==11.1.0
+zxing-cpp>=2.2,<3
+# Linux 微信数据库解密 / 消息解析
+pycryptodome==3.21.0
+zstandard==0.23.0
+# Telegram 转发
+python-telegram-bot==21.9

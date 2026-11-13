@@ -1,0 +1,20 @@
+services:
+  wechat2tg:
+    # 直接拉取 CI 构建好的镜像部署；如需本地构建改用 `docker compose build`
+    image: ghcr.io/bidabrain/wechat2tg:latest
+    # build: .
+    container_name: wechat2tg
+    restart: unless-stopped
+    ports:
+      - "8080:8080"              # 管理面板（noVNC 扫码 / 配置 / 日志）
+    environment:
+      WEB_PASSWORD: "change-me"  # 管理面板密码，务必修改
+      TZ: Asia/Shanghai
+      # ---- Telegram 转发（在面板里配置，或用环境变量预置）----
+      # TG_BOT_TOKEN: ""         # BotFather 申请的 bot token
+      # TG_CHAT_ID: ""           # 消息转发到的 chat id（你自己的 user id 或群 id）
+    cap_add:
+      - SYS_PTRACE               # 必须：读取微信进程内存以提取数据库密钥
+    shm_size: "1g"               # 微信(Electron/CEF)需要较大 /dev/shm
+    volumes:
+      - ./data:/data             # 持久化：登录态、聊天数据库、配置、日志
