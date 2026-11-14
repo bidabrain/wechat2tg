@@ -133,7 +133,8 @@ def _ocr_title() -> str:
                            capture_output=True, env=_env())
         if r.returncode != 0:
             return ""
-        _prep_ocr(png)
+        # 标题栏是粗黑大字，直接 OCR 即可；放大+二值化预处理反而会毁掉短名
+        # （如「塔子」被读成 ay），故此处不做 _prep_ocr。
         out = subprocess.run(["tesseract", png, "-", "-l", "chi_sim+eng"],
                              capture_output=True, text=True, env=_env())
         text = out.stdout.strip()
@@ -306,15 +307,15 @@ def _search(chat_name: str) -> None:
 
 
 def _open_chat(win: str, chat_name: str) -> bool:
-    """搜索并打开会话，按候选位依次点击，命中即止。
-    候选顺序：①头像+名字整段全绿命中行 ②OCR 文本匹配 ③固定首位。
-    ①是微信「完整匹配才整名高亮绿」的强保证(比短中文名标题 OCR 可靠)，命中即信任放行；
-    ②③不如①可靠，仍须标题栏黑字 OCR 核对，核对不过绝不发送。"""
+    """搜索并打开会话，按候选位依次点击并用标题栏 OCR 核对，命中即止。
+    定位候选顺序：①头像+名字整段全绿命中行(绕开下拉里不可靠的中文 OCR) ②下拉文本 OCR
+    匹配 ③固定首位。每个候选点开后都用标题栏黑字 OCR(_title_ok)核对，核对不过继续下一候选；
+    全部不过返回 False、绝不发送，避免误发到当前停留的会话。"""
     tried: list[int] = []
-    for build, trust in (
-        (lambda: (RESULT_XY[0], _first_match_row()), True),    # ①头像+名字整段全绿=完整匹配
-        (lambda: _find_result_row(chat_name), False),          # ②OCR 文本匹配兜底
-        (lambda: RESULT_XY, False),                            # ③固定首位兜底
+    for build in (
+        lambda: (RESULT_XY[0], _first_match_row()),    # ①头像+名字整段全绿定位
+        lambda: _find_result_row(chat_name),           # ②下拉 OCR 文本匹配
+        lambda: RESULT_XY,                             # ③固定首位兜底
     ):
         _search(chat_name)
         pos = build()
@@ -326,7 +327,7 @@ def _open_chat(win: str, chat_name: str) -> bool:
         tried.append(y)
         _click(pos[0], y)
         time.sleep(0.8)
-        if trust or _title_ok(chat_name):
+        if _title_ok(chat_name):                       # 标题栏核对通过才放行
             return True
     return False
 
