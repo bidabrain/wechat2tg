@@ -201,6 +201,67 @@ def _ocr_lines(region) -> list[tuple[str, int, int]]:
     return out
 
 
+def _first_match_row(region=DROPDOWN_REGION) -> int | None:
+    """定位要打开的会话行：同时满足【左侧有照片头像】且【名字整段高亮成品牌绿(完整命中)】，
+    取最靠上的这种行。绕开中文 OCR。查询回显/分区标题没有照片头像；收藏的「来自xxx」行
+    在结果行下方、名字非全绿，都被排除。返回该行中心 y 绝对坐标。
+    首次抓屏下拉可能还在渲染，故最多重试 2 次。"""
+    for attempt in range(2):
+        r = _scan_match_row(region)
+        if r is not None:
+            return r
+        time.sleep(0.5)                            # 等下拉渲染完再重扫
+    return None
+
+
+def _scan_match_row(region=DROPDOWN_REGION) -> int | None:
+    if Image is None:
+        return None
+    fd, png = tempfile.mkstemp(suffix=".png"); os.close(fd)
+    try:
+        if subprocess.run(["scrot", "-a", ",".join(map(str, region)), "-o", png],
+                          capture_output=True, env=_env()).returncode != 0:
+            return None
+        im = Image.open(png).convert("RGB"); px = im.load(); W, H = im.size
+        AX0, AX1 = 4, 52               # 头像列（相对 region；绝对约 x60-108）
+        TX0 = 74                       # 名字列起点（跳过头像）
+        green = []                     # 每行绿字像素数
+        for y in range(H):
+            n = 0
+            for x in range(TX0, W, 2):
+                r, g, b = px[x, y]
+                if g > 120 and g - r > 45 and g - b > 30 and r < 150:
+                    n += 1
+            green.append(n)
+
+        def has_avatar(y: int) -> bool:
+            vals = [px[x, y + dy] for x in range(AX0, min(AX1, W), 6)
+                    for dy in range(-6, 24, 6) if 0 <= y + dy < H]
+            if not vals:
+                return False
+            var = sum(max(v) - min(v) for v in vals) / len(vals)
+            avg = sum(sum(v) for v in vals) / (len(vals) * 3)
+            return var > 22 and avg < 248          # 照片头像（非空白/非纯色图标）
+
+        y = 44                                     # 跳过搜索框/查询回显
+        while y < H:
+            if green[y] >= 6:                      # 绿字聚集 = 命中名字
+                y0 = y
+                while y < H and green[y] >= 2:
+                    y += 1
+                cy = (y0 + y) // 2
+                if has_avatar(cy):                 # 且该行左侧有头像 → 真正的会话结果
+                    return region[1] + cy
+            else:
+                y += 1
+        return None
+    finally:
+        try:
+            os.remove(png)
+        except OSError:
+            pass
+
+
 def _find_result_row(chat_name: str) -> tuple[int, int] | None:
     """OCR 搜索下拉，找与 chat_name 匹配的结果行坐标（兼容联系人/群，联系人常在固定位，群靠 OCR）。"""
     g = _norm(chat_name)
@@ -223,8 +284,13 @@ def _find_result_row(chat_name: str) -> tuple[int, int] | None:
     return best
 
 
-def _open_chat(win: str, chat_name: str) -> bool:
-    """搜索并打开会话：OCR 下拉找匹配行点击（兼容群），联系人用固定位兜底，OCR 标题核对。"""
+def _title_ok(chat_name: str) -> bool:
+    title = _ocr_title()
+    g = _norm(chat_name)
+    return bool(title) and (title == g or (len(g) >= 2 and (g in title or title in g)))
+
+
+def _search(chat_name: str) -> None:
     _click(*SEARCH_XY)
     _x("key", "ctrl+a")
     _x("key", "Delete")
@@ -232,20 +298,30 @@ def _open_chat(win: str, chat_name: str) -> bool:
     time.sleep(0.1)
     _x("key", "ctrl+v")
     time.sleep(1.6)                 # 等下拉结果稳定
-    pos = _find_result_row(chat_name)
-    _click(*(pos or RESULT_XY))    # OCR 找到就点它，否则点固定首位（联系人）
-    time.sleep(0.8)
-    title = _ocr_title()
-    g = _norm(chat_name)
-    if bool(title) and (title == g or (len(g) >= 2 and (g in title or title in g))):
-        return True
-    # 兜底失败时再试另一种：之前点了 OCR 位就补点固定位，反之亦然
-    if pos:
-        _click(*SEARCH_XY); _x("key", "ctrl+a"); _x("key", "Delete")
-        _clip(chat_name); time.sleep(0.1); _x("key", "ctrl+v"); time.sleep(1.6)
-        _click(*RESULT_XY); time.sleep(0.8)
-        title = _ocr_title()
-        return bool(title) and (title == g or (len(g) >= 2 and (g in title or title in g)))
+
+
+def _open_chat(win: str, chat_name: str) -> bool:
+    """搜索并打开会话，按候选位依次点击并用标题 OCR 核对，命中即止。
+    候选顺序：①头像+名字全绿命中行(绕开中文 OCR) ②OCR 文本匹配 ③固定首位。
+    标题栏是黑色大字，比下拉绿色行 OCR 可靠，作为唯一放行依据，核对不过绝不发送。"""
+    tried: list[int] = []
+    for build in (
+        lambda: (RESULT_XY[0], _first_match_row()),    # ①头像+名字全绿命中
+        lambda: _find_result_row(chat_name),           # ②OCR 文本匹配兜底
+        lambda: RESULT_XY,                             # ③固定首位兜底
+    ):
+        _search(chat_name)
+        pos = build()
+        if not pos or pos[1] is None:
+            continue
+        y = pos[1]
+        if any(abs(y - t) <= 6 for t in tried):        # 这一行已点过，跳过
+            continue
+        tried.append(y)
+        _click(pos[0], y)
+        time.sleep(0.8)
+        if _title_ok(chat_name):
+            return True
     return False
 
 
