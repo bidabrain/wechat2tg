@@ -226,13 +226,16 @@ def _scan_match_row(region=DROPDOWN_REGION) -> int | None:
         AX0, AX1 = 4, 52               # 头像列（相对 region；绝对约 x60-108）
         TX0 = 74                       # 名字列起点（跳过头像）
         green = []                     # 每行绿字像素数
+        dark = []                      # 每行文字像素数（非浅色背景）
         for y in range(H):
-            n = 0
+            gn = 0; dk = 0
             for x in range(TX0, W, 2):
                 r, g, b = px[x, y]
-                if g > 120 and g - r > 45 and g - b > 30 and r < 150:
-                    n += 1
-            green.append(n)
+                if (r + g + b) / 3 < 205:                      # 文字像素（非背景）
+                    dk += 1
+                    if g > 120 and g - r > 45 and g - b > 30 and r < 150:
+                        gn += 1
+            green.append(gn); dark.append(dk)
 
         def has_avatar(y: int) -> bool:
             vals = [px[x, y + dy] for x in range(AX0, min(AX1, W), 6)
@@ -245,12 +248,14 @@ def _scan_match_row(region=DROPDOWN_REGION) -> int | None:
 
         y = 44                                     # 跳过搜索框/查询回显
         while y < H:
-            if green[y] >= 6:                      # 绿字聚集 = 命中名字
+            if green[y] >= 4:                      # 绿字聚集 = 命中名字
                 y0 = y
                 while y < H and green[y] >= 2:
                     y += 1
+                sg = sum(green[y0:y]); sd = sum(dark[y0:y])
                 cy = (y0 + y) // 2
-                if has_avatar(cy):                 # 且该行左侧有头像 → 真正的会话结果
+                # 名字整段几乎全绿(完整命中，而非只命中一段) 且 该行左侧有头像 → 真正的会话结果
+                if sd > 0 and sg >= 6 and sg / sd >= 0.5 and has_avatar(cy):
                     return region[1] + cy
             else:
                 y += 1
@@ -301,14 +306,15 @@ def _search(chat_name: str) -> None:
 
 
 def _open_chat(win: str, chat_name: str) -> bool:
-    """搜索并打开会话，按候选位依次点击并用标题 OCR 核对，命中即止。
-    候选顺序：①头像+名字全绿命中行(绕开中文 OCR) ②OCR 文本匹配 ③固定首位。
-    标题栏是黑色大字，比下拉绿色行 OCR 可靠，作为唯一放行依据，核对不过绝不发送。"""
+    """搜索并打开会话，按候选位依次点击，命中即止。
+    候选顺序：①头像+名字整段全绿命中行 ②OCR 文本匹配 ③固定首位。
+    ①是微信「完整匹配才整名高亮绿」的强保证(比短中文名标题 OCR 可靠)，命中即信任放行；
+    ②③不如①可靠，仍须标题栏黑字 OCR 核对，核对不过绝不发送。"""
     tried: list[int] = []
-    for build in (
-        lambda: (RESULT_XY[0], _first_match_row()),    # ①头像+名字全绿命中
-        lambda: _find_result_row(chat_name),           # ②OCR 文本匹配兜底
-        lambda: RESULT_XY,                             # ③固定首位兜底
+    for build, trust in (
+        (lambda: (RESULT_XY[0], _first_match_row()), True),    # ①头像+名字整段全绿=完整匹配
+        (lambda: _find_result_row(chat_name), False),          # ②OCR 文本匹配兜底
+        (lambda: RESULT_XY, False),                            # ③固定首位兜底
     ):
         _search(chat_name)
         pos = build()
@@ -320,7 +326,7 @@ def _open_chat(win: str, chat_name: str) -> bool:
         tried.append(y)
         _click(pos[0], y)
         time.sleep(0.8)
-        if _title_ok(chat_name):
+        if trust or _title_ok(chat_name):
             return True
     return False
 
