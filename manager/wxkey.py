@@ -34,11 +34,23 @@ WECHAT_PROC = "/usr/bin/wechat"
 
 
 def find_wechat_pid() -> int | None:
+    """遍历 /proc 找微信主进程 pid。纯文件操作、不起子进程——
+    bridge 是 asyncio 多线程进程，其 child-watcher 会和 subprocess(pgrep)
+    抢着 reap 子进程导致 waitpid ESRCH、调用偶发失败（表现为「未取到密钥」），
+    故这里不用 pgrep。"""
     try:
-        out = subprocess.check_output(["pgrep", "-f", "^" + WECHAT_PROC]).split()
-        return int(out[0]) if out else None
-    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        pids = [d for d in os.listdir("/proc") if d.isdigit()]
+    except OSError:
         return None
+    for d in pids:
+        try:
+            with open(f"/proc/{d}/cmdline", "rb") as f:
+                argv0 = f.read().split(b"\0", 1)[0].decode("utf-8", "ignore")
+        except OSError:
+            continue
+        if argv0 == WECHAT_PROC or argv0.startswith(WECHAT_PROC + " "):
+            return int(d)
+    return None
 
 
 def _db_heads(db_dir: str) -> dict[str, bytes]:
