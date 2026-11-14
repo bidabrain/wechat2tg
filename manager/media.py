@@ -89,6 +89,8 @@ def _ocr_menu_item(region: tuple[int, int, int, int], target: str) -> tuple[int,
     fd, png = tempfile.mkstemp(suffix=".png"); os.close(fd)
     try:
         _scrot(png, region)
+        send._prep_ocr(png)         # 与 send 一致的 OCR 预处理（放大+二值化）
+        s = send.OCR_SCALE if send.Image is not None else 1
         base = png[:-4]
         subprocess.run(["tesseract", png, base, "-l", "chi_sim", "tsv"], capture_output=True, env=_env())
         tsv = base + ".tsv"
@@ -108,7 +110,7 @@ def _ocr_menu_item(region: tuple[int, int, int, int], target: str) -> tuple[int,
             if target in text:
                 x0 = min(p[0] for p in parts); x1 = max(p[0] + p[2] for p in parts)
                 y0 = min(p[1] for p in parts); y1 = max(p[1] + p[3] for p in parts)
-                return (region[0] + (x0 + x1) // 2, region[1] + (y0 + y1) // 2)
+                return (region[0] + (x0 + x1) // (2 * s), region[1] + (y0 + y1) // (2 * s))
     finally:
         try:
             os.remove(png)

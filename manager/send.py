@@ -16,6 +16,29 @@ import tempfile
 import threading
 import time
 
+try:
+    from PIL import Image, ImageOps
+except ImportError:  # 没装 PIL 时跳过预处理（OCR 仍可用，只是精度差）
+    Image = None
+
+
+OCR_SCALE = 3
+
+
+def _prep_ocr(png: str):
+    """OCR 预处理：灰度 + 放大 + 轻度二值化，显著提升小字/彩色文字识别率。
+    放大后 tsv 坐标会乘以 OCR_SCALE，调用方需除回去。"""
+    if Image is None:
+        return
+    try:
+        im = Image.open(png).convert("L")
+        im = im.resize((im.width * OCR_SCALE, im.height * OCR_SCALE), Image.LANCZOS)
+        im = ImageOps.autocontrast(im)
+        im = im.point(lambda p: 0 if p < 170 else 255)   # 阈值：深色(含绿字)→黑，浅底→白
+        im.save(png)
+    except Exception:  # noqa: BLE001
+        pass
+
 DISPLAY = ":1"
 WIN_W, WIN_H = 1280, 800
 # 规整到 (0,0) 后的绝对坐标（实测校准）
@@ -110,6 +133,7 @@ def _ocr_title() -> str:
                            capture_output=True, env=_env())
         if r.returncode != 0:
             return ""
+        _prep_ocr(png)
         out = subprocess.run(["tesseract", png, "-", "-l", "chi_sim+eng"],
                              capture_output=True, text=True, env=_env())
         text = out.stdout.strip()
@@ -148,6 +172,8 @@ def _ocr_lines(region) -> list[tuple[str, int, int]]:
         if subprocess.run(["scrot", "-a", ",".join(map(str, region)), "-o", png],
                           capture_output=True, env=_env()).returncode != 0:
             return out
+        _prep_ocr(png)              # 放大 OCR_SCALE 倍 + 二值化（坐标随之放大）
+        s = OCR_SCALE if Image is not None else 1
         base = png[:-4]
         subprocess.run(["tesseract", png, base, "-l", "chi_sim+eng", "tsv"], capture_output=True, env=_env())
         tsv = base + ".tsv"
@@ -166,7 +192,7 @@ def _ocr_lines(region) -> list[tuple[str, int, int]]:
             text = "".join(p[4] for p in parts)
             x0 = min(p[0] for p in parts); x1 = max(p[0] + p[2] for p in parts)
             y0 = min(p[1] for p in parts); y1 = max(p[1] + p[3] for p in parts)
-            out.append((text, region[0] + (x0 + x1) // 2, region[1] + (y0 + y1) // 2))
+            out.append((text, region[0] + (x0 + x1) // (2 * s), region[1] + (y0 + y1) // (2 * s)))
     finally:
         try:
             os.remove(png)
