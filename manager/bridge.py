@@ -31,6 +31,7 @@ except ImportError:  # 独立运行
     from common import DATA
 
 from telegram import BotCommand, Update
+from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 POLL_CONFIG_SEC = 5
@@ -116,6 +117,35 @@ class Bridge:
                 pass
             return tid
 
+    @staticmethod
+    def _thread_gone(e: Exception) -> bool:
+        """TG 报错是否为「话题线程不存在」——用户在 TG 里手动删了这个 topic。"""
+        s = str(e).lower()
+        return "thread not found" in s or "topic_deleted" in s or "topic deleted" in s
+
+    async def _drop_topic(self, chat_id: str, tid: int):
+        """topic 已被手动删除：清掉陈旧映射，下次 _topic_for 会重建一个新的。"""
+        async with self._topic_lock:
+            if self.map.get(chat_id, {}).get("topic_id") == tid:
+                self.map.pop(chat_id, None)
+                self.rev.pop(tid, None)
+                self._fresh_topics.discard(tid)
+                self._save_topics()
+
+    async def _deliver(self, chat_id: str, chat_name: str, do, tid=...):
+        """执行发送 do(tid)；若 topic 被用户删掉(thread not found)，自动重建后重发一次。"""
+        if tid is ...:
+            tid = await self._topic_for(chat_id, chat_name)
+        try:
+            await do(tid)
+        except BadRequest as e:
+            if tid is None or not self._thread_gone(e):
+                raise
+            print(f"[bridge] topic {tid} 已被删除，重建后重发（会话 {chat_name}）", flush=True)
+            await self._drop_topic(chat_id, tid)
+            tid = await self._topic_for(chat_id, chat_name)
+            await do(tid)
+
     # -------------------------------------------------- 微信 → TG
     def _on_wx(self, m: Message):
         if not self.cfg.get("forward_enabled", True) or not self.loop or not self.app:
@@ -134,9 +164,17 @@ class Bridge:
             ext = "mp4" if is_video else "jpg"
             return media.save_latest_media(f"wx_{m.table[:8]}_{m.local_id}.{ext}", is_video=is_video)
 
+    async def _unpin_if_fresh(self, tid):
+        # 新建 topic 的首条消息发完，再清一次置顶（有的客户端会把首条自动置顶）
+        if tid in self._fresh_topics:
+            self._fresh_topics.discard(tid)
+            try:
+                await self.app.bot.unpin_all_forum_topic_messages(self.chat_id, tid)
+            except Exception:  # noqa: BLE001
+                pass
+
     async def _send_tg(self, m: Message):
         try:
-            tid = await self._topic_for(m.chat_id, m.chat_name)
             prefix = f"{m.sender_name}:\n" if (m.is_group and m.sender_name) else ("🟢 我：" if m.is_self else "")
             cap = prefix.strip(" :\n") or None
             # 图片(3)/视频(43)：抓取解密文件发为 photo/video；失败回退占位文本
@@ -145,32 +183,33 @@ class Bridge:
                 path = await asyncio.to_thread(self._grab_media, m, is_video)
                 if path:
                     try:
-                        with open(path, "rb") as f:
-                            if is_video:
-                                await self.app.bot.send_video(self.chat_id, f, message_thread_id=tid, caption=cap)
-                            else:
-                                await self.app.bot.send_photo(self.chat_id, f, message_thread_id=tid, caption=cap)
+                        async def _do_media(tid):
+                            with open(path, "rb") as f:
+                                if is_video:
+                                    await self.app.bot.send_video(self.chat_id, f, message_thread_id=tid, caption=cap)
+                                else:
+                                    await self.app.bot.send_photo(self.chat_id, f, message_thread_id=tid, caption=cap)
+                            await self._unpin_if_fresh(tid)
+                        await self._deliver(m.chat_id, m.chat_name, _do_media)
                         return
                     finally:
                         try:
                             os.remove(path)
                         except OSError:
                             pass
+            tid0 = await self._topic_for(m.chat_id, m.chat_name)
             text = m.text or ""
             if m.is_group and m.sender_name:
                 text = f"{m.sender_name}:\n{text}"
             elif m.is_self:
                 text = f"🟢 我：{text}"           # 自己从微信客户端/手机发的
-            elif tid is None:
+            elif tid0 is None:
                 text = f"【{m.chat_name}】{text}"   # 没有 topic 时带上会话名
-            await self.app.bot.send_message(self.chat_id, text, message_thread_id=tid)
-            # 新建 topic 的首条消息发完，再清一次置顶（有的客户端会把首条自动置顶）
-            if tid in self._fresh_topics:
-                self._fresh_topics.discard(tid)
-                try:
-                    await self.app.bot.unpin_all_forum_topic_messages(self.chat_id, tid)
-                except Exception:  # noqa: BLE001
-                    pass
+
+            async def _do_text(tid):
+                await self.app.bot.send_message(self.chat_id, text, message_thread_id=tid)
+                await self._unpin_if_fresh(tid)
+            await self._deliver(m.chat_id, m.chat_name, _do_text, tid0)
         except Exception as e:  # noqa: BLE001
             print("发送到 TG 失败:", e, flush=True)
 
