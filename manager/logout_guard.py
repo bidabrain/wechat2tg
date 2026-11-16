@@ -52,24 +52,34 @@ def _ocr(region):
             pass
 
 
+SCAN_SEC = 0.4   # 扫描间隔：越短，框弹出到被关掉的窗口越小（原 1.0s 太慢，发送的 Return 可能先打上去）
+
+
 def main():
-    print("[logout-guard] 启动，持续守护登出确认框", flush=True)
+    print("[logout-guard] 启动，持续守护登出确认框（Escape 优先，%.1fs 扫描）" % SCAN_SEC, flush=True)
     while True:
         try:
-            text, cancel = _ocr(REGION)
+            text, _ = _ocr(REGION)
             if "退出登录" in text:
-                if cancel and cancel[0] >= 62:
-                    subprocess.run(["xdotool", "mousemove", str(cancel[0]), str(cancel[1])], env=ENV)
-                    time.sleep(0.1)
-                    subprocess.run(["xdotool", "click", "1"], env=ENV)
-                    print(f"[logout-guard] 检测到登出框 → 已点「取消」{cancel}", flush=True)
+                # 先按 Escape 立即关闭——最快，不依赖认出「取消」按钮；模态框对 Escape 响应
+                subprocess.run(["xdotool", "key", "Escape"], env=ENV)
+                time.sleep(0.15)
+                # 复查：Escape 偶尔不被接受时，再去点「取消」兜底
+                text2, cancel = _ocr(REGION)
+                if "退出登录" in text2:
+                    if cancel and cancel[0] >= 62:
+                        subprocess.run(["xdotool", "mousemove", str(cancel[0]), str(cancel[1])], env=ENV)
+                        time.sleep(0.1)
+                        subprocess.run(["xdotool", "click", "1"], env=ENV)
+                        print(f"[logout-guard] 登出框 → Escape 未关，补点「取消」{cancel}", flush=True)
+                    else:
+                        print("[logout-guard] 登出框 → Escape 后仍在，但未找到「取消」", flush=True)
                 else:
-                    subprocess.run(["xdotool", "key", "Escape"], env=ENV)   # 兜底
-                    print("[logout-guard] 检测到登出框 → Escape 兜底", flush=True)
-                time.sleep(0.5)
+                    print("[logout-guard] 检测到登出框 → Escape 已关闭", flush=True)
+                time.sleep(0.3)
         except Exception as e:  # noqa: BLE001
             print("[logout-guard] 异常:", e, flush=True)
-        time.sleep(1.0)
+        time.sleep(SCAN_SEC)
 
 
 if __name__ == "__main__":

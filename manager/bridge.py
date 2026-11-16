@@ -242,6 +242,7 @@ class Bridge:
         if not chat_id or not msg.photo:
             return
         name = self.map[chat_id]["name"]
+        print(f"[tg→wx] 图片 → {name} caption={bool(msg.caption)}", flush=True)
         tmp = DATA / "media" / f"tg_{msg.message_id}.jpg"
         tmp.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -271,6 +272,7 @@ class Bridge:
         if not chat_id or not media_obj:
             return
         name = self.map[chat_id]["name"]
+        print(f"[tg→wx] 视频 → {name} caption={bool(msg.caption)}", flush=True)
         tmp = DATA / "media" / f"tg_{msg.message_id}.mp4"
         tmp.parent.mkdir(parents=True, exist_ok=True)
         try:

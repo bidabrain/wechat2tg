@@ -74,14 +74,52 @@ def _pointer() -> tuple[int, int]:
     return x, y
 
 
+# 所有会"按下"的指针动作都要查危险区（不止 click：还有拖拽用的 mousedown/mouseup）。
+# mousemove 不算——移动无害，真正落子的按键动作才拦。
+_BTN_ACTIONS = ("click", "mousedown", "mouseup")
+
+
 def _x(*args: str) -> subprocess.CompletedProcess:
-    # 点击前的安全护栏：指针在危险区则拒绝点击，避免误触退出登录/切页/关窗
-    if args and args[0] == "click":
+    # 点击/按下前的安全护栏：指针在危险区则拒绝，避免误触退出登录/切页/关窗
+    if args and args[0] in _BTN_ACTIONS:
         px, py = _pointer()
         if px < SAFE_MIN_X or py < SAFE_MIN_Y:
-            print(f"[send] 安全护栏：拒绝在危险区点击 ({px},{py})", flush=True)
+            print(f"[send] 安全护栏：拒绝在危险区 {args[0]} ({px},{py})", flush=True)
             return subprocess.CompletedProcess(args, 0, "", "")
     return subprocess.run(["xdotool", *args], capture_output=True, text=True, env=_env())
+
+
+# ---- C: 注销框探针。发送各步后就地探测「退出登录」框，命中即存全屏图+记步骤名，
+#         用于定位到底哪一步误触（logout_guard 会很快关掉它，故探针紧贴每步之后跑）。
+LOGOUT_REGION = (380, 270, 540, 260)
+
+
+def _logout_dialog_present() -> bool:
+    fd, png = tempfile.mkstemp(suffix=".png"); os.close(fd)
+    try:
+        if subprocess.run(["scrot", "-a", ",".join(map(str, LOGOUT_REGION)), "-o", png],
+                          capture_output=True, env=_env()).returncode != 0:
+            return False
+        out = subprocess.run(["tesseract", png, "-", "-l", "chi_sim"],
+                             capture_output=True, text=True, env=_env()).stdout
+        return "退出登录" in out
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        try:
+            os.remove(png)
+        except OSError:
+            pass
+
+
+def _dbg_logout(step: str) -> None:
+    try:
+        if _logout_dialog_present():
+            full = f"/data/logout_caught_{step}_{int(time.time())}.png"
+            subprocess.run(["scrot", "-o", full], capture_output=True, env=_env())
+            print(f"[send][!!注销框] 触发步骤={step}，已存 {full}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print("[send] _dbg_logout 异常:", e, flush=True)
 
 
 def _wechat_win() -> str | None:
@@ -366,9 +404,17 @@ def send_image_to_chat(chat_name: str, chat_id: str, image_path: str) -> dict:
         _normalize(win)
         if not _open_chat(win, chat_name):
             return {"ok": False, "step": "verify", "msg": f"未能定位会话「{chat_name}」（已避免误发）"}
+        _dbg_logout("img_after_open")
         _clip_image(image_path)
         time.sleep(0.3)
-        _paste_send()
+        _click(*INPUT_XY)
+        time.sleep(0.2)
+        _x("key", "ctrl+v")
+        time.sleep(0.8)
+        _dbg_logout("img_after_paste")
+        _x("key", "Return")
+        time.sleep(0.6)
+        _dbg_logout("img_after_return")
         return {"ok": True, "step": "sent", "msg": "已发送图片"}
 
 
@@ -391,8 +437,10 @@ def send_file_to_chat(chat_name: str, chat_id: str, file_path: str) -> dict:
         _normalize(win)
         if not _open_chat(win, chat_name):
             return {"ok": False, "step": "verify", "msg": f"未能定位会话「{chat_name}」（已避免误发）"}
+        _dbg_logout("file_after_open")
         _click(*FILE_BTN_XY)
         if not _file_dialog_open():
+            _dbg_logout("file_no_dialog")
             return {"ok": False, "step": "dialog", "msg": "未弹出文件选择对话框"}
         _click(*DLG_NAME_XY)        # 文件名字段
         _x("key", "ctrl+a")
@@ -401,8 +449,10 @@ def send_file_to_chat(chat_name: str, chat_id: str, file_path: str) -> dict:
         time.sleep(0.3)
         _x("key", "Return")         # 选中文件 → 附加到输入框
         time.sleep(1.0)
+        _dbg_logout("file_after_attach")
         _click(*SEND_BTN_XY)        # 发送
         time.sleep(0.5)
+        _dbg_logout("file_after_send")
         return {"ok": True, "step": "sent", "msg": "已发送文件"}
 
 
