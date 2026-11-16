@@ -236,8 +236,10 @@ class Bridge:
         """图片/视频带的评论(caption) → 作为一条文本紧跟着发到同一微信会话。"""
         cap = (msg.caption or "").strip()
         if not cap:
+            log_event("caption", f"会话={name} 跳过(空caption)")
             return
         rc = await asyncio.to_thread(send.send_to_chat, name, chat_id, cap)
+        log_event("caption", f"会话={name} ok={rc.get('ok')} step={rc.get('step')} msg={rc.get('msg')} 文本={cap[:30]!r}")
         if rc.get("ok"):
             self._recent_sent.append((chat_id, self._norm(cap), time.time()))
         else:

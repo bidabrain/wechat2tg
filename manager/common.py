@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 
 log = logging.getLogger("manager")
@@ -108,6 +109,27 @@ def log_event(source: str, detail: str) -> None:
             f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{source}\t{detail}\n")
     except OSError:
         pass
+
+
+# 「当前动作面包屑」：发送/抓媒体的 UI 自动化每做一步就覆盖写这里；看门狗抓到注销框时
+# 读最近这条，便能标出「框弹出前最后一个动作是什么、距今多久」，定位到底是哪步误触。
+LAST_ACTION = DATA / "last_action.txt"
+
+
+def set_action(label: str) -> None:
+    try:
+        LAST_ACTION.write_text(f"{time.time():.3f}\t{label}", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def read_action() -> str:
+    """返回 '<age秒>s前: <label>'，无记录返回 ''。"""
+    try:
+        ts, _, label = LAST_ACTION.read_text(encoding="utf-8").partition("\t")
+        return f"{time.time() - float(ts):.1f}s前: {label}"
+    except (OSError, ValueError):
+        return ""
 
 
 def tail(path: Path, lines: int = 300) -> str:

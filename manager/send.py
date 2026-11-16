@@ -56,6 +56,24 @@ def _env() -> dict:
     return {**os.environ, "DISPLAY": DISPLAY}
 
 
+# 动作面包屑：每个 UI 动作覆盖写一次，看门狗抓到注销框时读它，定位触发步骤。
+try:
+    from common import set_action as _set_action
+except ImportError:
+    try:
+        from .common import set_action as _set_action
+    except ImportError:
+        def _set_action(label: str) -> None:  # 独立跑且无 common 时退化为空操作
+            pass
+
+
+def _act(label: str) -> None:
+    try:
+        _set_action(label)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # 危险区：左侧边栏/头像列 (x<62) 会误触个人资料→退出登录、切到联系人页；
 # 顶部标题栏 (y<26) 有最小化/关闭。任何 click 落在这些区域一律拒绝。
 SAFE_MIN_X = 62
@@ -84,8 +102,12 @@ def _x(*args: str) -> subprocess.CompletedProcess:
     if args and args[0] in _BTN_ACTIONS:
         px, py = _pointer()
         if px < SAFE_MIN_X or py < SAFE_MIN_Y:
+            _act(f"拒绝危险区{args[0]}({px},{py})")
             print(f"[send] 安全护栏：拒绝在危险区 {args[0]} ({px},{py})", flush=True)
             return subprocess.CompletedProcess(args, 0, "", "")
+        _act(f"{args[0]}({px},{py})")          # 面包屑：记下这次按键动作的坐标
+    elif args and args[0] in ("key", "type"):
+        _act(f"{args[0]} {' '.join(args[1:])[:40]}")
     return subprocess.run(["xdotool", *args], capture_output=True, text=True, env=_env())
 
 
