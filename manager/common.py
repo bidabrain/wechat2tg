@@ -1,6 +1,7 @@
 """管理面板公共工具：路径、命令执行、adb、持久状态。"""
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -93,6 +94,20 @@ def save_state():
     tmp = STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(STATE, ensure_ascii=False, indent=2), "utf-8")
     tmp.replace(STATE_PATH)
+
+
+# ---------------------------------------------------------------- 长期事件台账
+# 带完整时间戳、追加到我们自己的文件（不随 supervisor 日志轮转），用于长期追踪
+# 随机出现的「退出登录」误触：发媒体(含 caption 真/假)、探针抓到、看门狗抓到 都往这里写。
+LOGOUT_EVENTS = DATA / "logout_events.log"
+
+
+def log_event(source: str, detail: str) -> None:
+    try:
+        with open(LOGOUT_EVENTS, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{source}\t{detail}\n")
+    except OSError:
+        pass
 
 
 def tail(path: Path, lines: int = 300) -> str:

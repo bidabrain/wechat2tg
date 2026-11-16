@@ -112,12 +112,24 @@ def _logout_dialog_present() -> bool:
             pass
 
 
+def _log_event(source: str, detail: str) -> None:
+    try:
+        try:
+            from common import log_event
+        except ImportError:
+            from .common import log_event
+        log_event(source, detail)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _dbg_logout(step: str) -> None:
     try:
         if _logout_dialog_present():
             full = f"/data/logout_caught_{step}_{int(time.time())}.png"
             subprocess.run(["scrot", "-o", full], capture_output=True, env=_env())
             print(f"[send][!!注销框] 触发步骤={step}，已存 {full}", flush=True)
+            _log_event("send-probe", f"step={step} shot={full}")
     except Exception as e:  # noqa: BLE001
         print("[send] _dbg_logout 异常:", e, flush=True)
 

@@ -22,13 +22,13 @@ import os
 try:
     from . import config, media, send
     from .collector import Collector, Message
-    from .common import DATA
+    from .common import DATA, log_event
 except ImportError:  # 独立运行
     import config
     import media
     import send
     from collector import Collector, Message
-    from common import DATA
+    from common import DATA, log_event
 
 from telegram import BotCommand, Update
 from telegram.error import BadRequest
@@ -243,6 +243,7 @@ class Bridge:
             return
         name = self.map[chat_id]["name"]
         print(f"[tg→wx] 图片 → {name} caption={bool(msg.caption)}", flush=True)
+        log_event("tg→wx", f"图片 会话={name} caption={bool(msg.caption)}")
         tmp = DATA / "media" / f"tg_{msg.message_id}.jpg"
         tmp.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -273,6 +274,7 @@ class Bridge:
             return
         name = self.map[chat_id]["name"]
         print(f"[tg→wx] 视频 → {name} caption={bool(msg.caption)}", flush=True)
+        log_event("tg→wx", f"视频 会话={name} caption={bool(msg.caption)}")
         tmp = DATA / "media" / f"tg_{msg.message_id}.mp4"
         tmp.parent.mkdir(parents=True, exist_ok=True)
         try:

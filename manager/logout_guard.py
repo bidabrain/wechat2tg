@@ -11,6 +11,17 @@ import time
 
 DISPLAY = os.environ.get("DISPLAY", ":1")
 ENV = {**os.environ, "DISPLAY": DISPLAY}
+
+
+def _log_event(source: str, detail: str) -> None:
+    try:
+        try:
+            from common import log_event
+        except ImportError:
+            from .common import log_event
+        log_event(source, detail)
+    except Exception:  # noqa: BLE001
+        pass
 # 对话框居中出现，扫中央一条带
 REGION = (380, 270, 540, 260)   # x, y, w, h
 
@@ -61,6 +72,10 @@ def main():
         try:
             text, _ = _ocr(REGION)
             if "退出登录" in text:
+                # 抓到框先存全屏图 + 写长期台账（时间戳），再处置——留证据定位随机触发
+                shot = f"/data/logout_caught_guard_{int(time.time())}.png"
+                subprocess.run(["scrot", "-o", shot], capture_output=True, env=ENV)
+                _log_event("guard", f"caught shot={shot}")
                 # 先按 Escape 立即关闭——最快，不依赖认出「取消」按钮；模态框对 Escape 响应
                 subprocess.run(["xdotool", "key", "Escape"], env=ENV)
                 time.sleep(0.15)
