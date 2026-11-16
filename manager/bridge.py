@@ -232,6 +232,17 @@ class Bridge:
         else:
             await msg.reply_text(f"❌ 发送失败：{r.get('msg')}")
 
+    async def _send_caption(self, msg, name: str, chat_id: str) -> None:
+        """图片/视频带的评论(caption) → 作为一条文本紧跟着发到同一微信会话。"""
+        cap = (msg.caption or "").strip()
+        if not cap:
+            return
+        rc = await asyncio.to_thread(send.send_to_chat, name, chat_id, cap)
+        if rc.get("ok"):
+            self._recent_sent.append((chat_id, self._norm(cap), time.time()))
+        else:
+            await msg.reply_text(f"❌ 评论发送失败：{rc.get('msg')}")
+
     async def on_tg_photo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """TG 某 topic 里发来的图片 → 下载 → 粘贴发回对应微信会话。"""
         if not self.cfg.get("reply_enabled", True):
@@ -252,6 +263,7 @@ class Bridge:
             r = await asyncio.to_thread(send.send_image_to_chat, name, chat_id, str(tmp))
             if r.get("ok"):
                 self._recent_sent.append((chat_id, "\x00MEDIA", time.time()))
+                await self._send_caption(msg, name, chat_id)   # 图片的评论跟着发
             else:
                 await msg.reply_text(f"❌ 图片发送失败：{r.get('msg')}")
         except Exception as e:  # noqa: BLE001
@@ -283,6 +295,7 @@ class Bridge:
             r = await asyncio.to_thread(send.send_file_to_chat, name, chat_id, str(tmp))
             if r.get("ok"):
                 self._recent_sent.append((chat_id, "\x00MEDIA", time.time()))
+                await self._send_caption(msg, name, chat_id)   # 视频的评论跟着发
             else:
                 await msg.reply_text(f"❌ 视频发送失败：{r.get('msg')}")
         except Exception as e:  # noqa: BLE001
