@@ -155,10 +155,21 @@ def _save_via_menu(cx: int, cy: int, out_path: str, is_video: bool = False) -> b
     pos = _rightclick_find_save(cx, cy)
     if not pos and is_video:
         _X("mousemove", str(cx), str(cy)); time.sleep(0.2)
-        _X("click", "1"); time.sleep(1.0)     # 左键一次触发下载（可能开播放器）
-        _X("key", "Escape"); time.sleep(0.5)  # 仅用 Escape 关播放器，绝不 windowclose
-        for _ in range(8):                    # 等下载，最多 ~16s
-            time.sleep(2.0)
+        _X("click", "1")                      # 左键一次触发下载（真视频会开「图片和视频」播放器）
+        # 视频号/抖音分享：左键开不出播放器、反而开视频号/小程序覆盖窗，根本存不下来。
+        # 轮询等播放器最多 ~4s：出现=真视频，继续短重试；一直不出现=分享视频，立即放弃，
+        # 绝不在聊天区继续空转反复右键（空转乱点是误触「退出登录」的根源）。
+        has_player = False
+        for _ in range(8):
+            time.sleep(0.5)
+            if _X("search", "--name", "图片和视频").stdout.strip():
+                has_player = True
+                break
+        _X("key", "Escape"); time.sleep(0.5)  # 仅用 Escape 关播放器/覆盖层，绝不 windowclose
+        if not has_player:
+            return False                      # 开不出播放器=不可下载的分享视频，直接放弃
+        for _ in range(2):                    # 可下载视频：短重试 ~3s（原 8×16s 空转）
+            time.sleep(1.5)
             pos = _rightclick_find_save(cx, cy)
             if pos:
                 break
